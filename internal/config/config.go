@@ -26,6 +26,8 @@ type Config struct {
 
 	AdminUsername string
 	AdminPassword string
+
+	UIPreview bool
 }
 
 func Load() (Config, error) {
@@ -56,6 +58,13 @@ func Load() (Config, error) {
 	}
 	if cfg.CookieSecure, err = boolEnv("COOKIE_SECURE", cfg.AppEnv == "production"); err != nil {
 		return Config{}, err
+	}
+
+	if cfg.UIPreview, err = boolEnv("UI_PREVIEW", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.UIPreview && cfg.AppEnv == "production" {
+		return Config{}, errors.New("UI_PREVIEW must not be enabled in production")
 	}
 
 	key, err := decodeKey(os.Getenv("ENCRYPTION_KEY"))
