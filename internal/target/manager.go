@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +18,19 @@ import (
 	"leafygo/internal/domain"
 	"leafygo/internal/secret"
 )
+
+const maxExplainOutputBytes = 64 * 1024
+
+func truncateToBytes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	s = s[:maxBytes]
+	for !utf8.ValidString(s) && len(s) > 0 {
+		s = s[:len(s)-1]
+	}
+	return s
+}
 
 type Options struct {
 	ConnectTimeout  time.Duration
@@ -210,6 +225,94 @@ func (m *Manager) Run(ctx context.Context, db domain.DBConnection, sql string, t
 	committed = true
 
 	return time.Since(start), nil
+}
+
+func (m *Manager) Explain(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (string, error) {
+	password, err := m.box.Decrypt(db.PasswordEnc)
+	if err != nil {
+		return "", classifyRunError(phaseConnect, fmt.Errorf("decrypt credentials: %w", err))
+	}
+
+	dsn, err := buildDSN(db, password)
+	if err != nil {
+		return "", classifyRunError(phaseConnect, fmt.Errorf("build dsn: %w", err))
+	}
+
+	connCfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return "", classifyRunError(phaseConnect, fmt.Errorf("parse config: %w", err))
+	}
+	connCfg.ConnectTimeout = m.opts.ConnectTimeout
+
+	conn, err := pgx.ConnectConfig(ctx, connCfg)
+	if err != nil {
+		return "", classifyRunError(phaseConnect, err)
+	}
+
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 5*time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx)
+	}()
+
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return "", classifyRunError(phaseConnect, err)
+	}
+
+	defer func() {
+		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rbCtx)
+	}()
+
+	remaining := timeout
+	if deadline, ok := ctx.Deadline(); ok {
+		rem := time.Until(deadline)
+		if rem <= 0 {
+			remaining = time.Millisecond
+		} else {
+			remaining = rem
+		}
+	}
+	if remaining < time.Millisecond {
+		remaining = time.Millisecond
+	}
+
+	msStr := strconv.FormatInt(remaining.Milliseconds(), 10)
+	if _, err := tx.Exec(ctx, "select set_config('statement_timeout', $1, true)", msStr); err != nil {
+		return "", classifyRunError(phaseStatement, err)
+	}
+	if _, err := tx.Exec(ctx, "select set_config('lock_timeout', '5s', true)"); err != nil {
+		return "", classifyRunError(phaseStatement, err)
+	}
+
+	explainSQL := "EXPLAIN (FORMAT TEXT) " + sql
+	rows, err := tx.Query(ctx, explainSQL, pgx.QueryExecModeSimpleProtocol)
+	if err != nil {
+		return "", classifyRunError(phaseStatement, err)
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return "", classifyRunError(phaseStatement, err)
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(line)
+		if sb.Len() >= maxExplainOutputBytes {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", classifyRunError(phaseStatement, err)
+	}
+
+	return truncateToBytes(sb.String(), maxExplainOutputBytes), nil
 }
 
 func (m *Manager) Test(ctx context.Context, db domain.DBConnection) error {

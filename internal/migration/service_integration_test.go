@@ -389,6 +389,10 @@ func (r *blockingRunner) Run(ctx context.Context, db domain.DBConnection, sql st
 	return 10 * time.Millisecond, nil
 }
 
+func (r *blockingRunner) Explain(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (string, error) {
+	return "blockingRunner Explain", nil
+}
+
 func TestExecuteThreeDBsMaxTwoRunning(t *testing.T) {
 	st, _, dbConn, user, _ := setupIntegration(t)
 	ctx := context.Background()
@@ -617,5 +621,197 @@ func TestExecuteLockTimeout(t *testing.T) {
 	_, err = svc.ExecuteDraft(ctx, in)
 	if !errors.Is(err, migration.ErrLockTimeout) {
 		t.Errorf("expected ErrLockTimeout, got %v", err)
+	}
+}
+
+func TestServiceExplainSuccess(t *testing.T) {
+	st, mgr, dbConn, user, _ := setupIntegration(t)
+	ctx := context.Background()
+
+	draft, err := st.CreateMigrationDraft(ctx, domain.MigrationDraft{
+		DBID:      dbConn.ID,
+		Title:     "Explain Test Draft",
+		SQLText:   "SELECT 1;",
+		CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := migration.NewService(st, mgr, migration.Options{
+		MigrationTimeout: 5 * time.Second,
+	})
+
+	in := migration.ExplainInput{
+		Actor:   user,
+		DB:      dbConn,
+		Level:   domain.LevelEdit,
+		DraftID: draft.ID,
+		Token:   draft.Revision,
+		SQL:     "SELECT 1;",
+	}
+
+	plan, err := svc.ExplainDraft(ctx, in)
+	if err != nil {
+		t.Fatalf("ExplainDraft failed: %v", err)
+	}
+	if len(strings.TrimSpace(plan)) == 0 {
+		t.Fatal("expected non-empty explain plan")
+	}
+
+	// Verify draft revision and SQL unchanged
+	d, err := st.GetMigrationDraft(ctx, dbConn.ID, draft.ID)
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	if d.Revision != draft.Revision {
+		t.Errorf("expected draft revision %d, got %d", draft.Revision, d.Revision)
+	}
+
+	// Verify no history written
+	histories, err := st.ListMigrationHistory(ctx, dbConn.ID, 10)
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(histories) != 0 {
+		t.Errorf("expected 0 histories, got %d", len(histories))
+	}
+}
+
+func TestServiceExplainDDLMessage(t *testing.T) {
+	st, mgr, dbConn, user, _ := setupIntegration(t)
+	ctx := context.Background()
+
+	draft, err := st.CreateMigrationDraft(ctx, domain.MigrationDraft{
+		DBID:      dbConn.ID,
+		Title:     "DDL Draft",
+		SQLText:   "CREATE TABLE explain_ddl_test (id int);",
+		CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := migration.NewService(st, mgr, migration.Options{
+		MigrationTimeout: 5 * time.Second,
+	})
+
+	in := migration.ExplainInput{
+		Actor:   user,
+		DB:      dbConn,
+		Level:   domain.LevelEdit,
+		DraftID: draft.ID,
+		Token:   draft.Revision,
+		SQL:     "CREATE TABLE explain_ddl_test (id int);",
+	}
+
+	plan, err := svc.ExplainDraft(ctx, in)
+	if err != nil {
+		t.Fatalf("ExplainDraft error on DDL: %v", err)
+	}
+	if plan != "EXPLAIN tidak berlaku untuk DDL." {
+		t.Errorf("expected 'EXPLAIN tidak berlaku untuk DDL.', got %q", plan)
+	}
+
+	// Verify history remains empty
+	histories, err := st.ListMigrationHistory(ctx, dbConn.ID, 10)
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(histories) != 0 {
+		t.Errorf("expected 0 histories, got %d", len(histories))
+	}
+}
+
+func TestServiceExplainTokenMismatch(t *testing.T) {
+	st, mgr, dbConn, user, _ := setupIntegration(t)
+	ctx := context.Background()
+
+	draft, err := st.CreateMigrationDraft(ctx, domain.MigrationDraft{
+		DBID:      dbConn.ID,
+		Title:     "Token Mismatch Draft",
+		SQLText:   "SELECT 1;",
+		CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := migration.NewService(st, mgr, migration.Options{})
+
+	in := migration.ExplainInput{
+		Actor:   user,
+		DB:      dbConn,
+		Level:   domain.LevelEdit,
+		DraftID: draft.ID,
+		Token:   draft.Revision + 99,
+		SQL:     "SELECT 1;",
+	}
+
+	_, err = svc.ExplainDraft(ctx, in)
+	if !errors.Is(err, migration.ErrConflict) {
+		t.Errorf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestServiceExplainViewOnlyForbidden(t *testing.T) {
+	st, mgr, dbConn, user, _ := setupIntegration(t)
+	ctx := context.Background()
+
+	draft, err := st.CreateMigrationDraft(ctx, domain.MigrationDraft{
+		DBID:      dbConn.ID,
+		Title:     "View Only Draft",
+		SQLText:   "SELECT 1;",
+		CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := migration.NewService(st, mgr, migration.Options{})
+
+	in := migration.ExplainInput{
+		Actor:   user,
+		DB:      dbConn,
+		Level:   domain.LevelView,
+		DraftID: draft.ID,
+		Token:   draft.Revision,
+		SQL:     "SELECT 1;",
+	}
+
+	_, err = svc.ExplainDraft(ctx, in)
+	if !errors.Is(err, migration.ErrForbidden) {
+		t.Errorf("expected ErrForbidden for LevelView, got %v", err)
+	}
+}
+
+func TestServiceExplainMultiStatementRejected(t *testing.T) {
+	st, mgr, dbConn, user, _ := setupIntegration(t)
+	ctx := context.Background()
+
+	draft, err := st.CreateMigrationDraft(ctx, domain.MigrationDraft{
+		DBID:      dbConn.ID,
+		Title:     "Multi Stmt Draft",
+		SQLText:   "SELECT 1; SELECT 2;",
+		CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := migration.NewService(st, mgr, migration.Options{})
+
+	in := migration.ExplainInput{
+		Actor:   user,
+		DB:      dbConn,
+		Level:   domain.LevelEdit,
+		DraftID: draft.ID,
+		Token:   draft.Revision,
+		SQL:     "SELECT 1; SELECT 2;",
+	}
+
+	_, err = svc.ExplainDraft(ctx, in)
+	if !errors.Is(err, migration.ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
 	}
 }

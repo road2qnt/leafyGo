@@ -358,3 +358,73 @@ func TestInvalidateConcurrentWithPool(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestTargetExplainSelect(t *testing.T) {
+	mgr, dbConn, _ := setupTestTarget(t)
+	ctx := context.Background()
+
+	plan, err := mgr.Explain(ctx, dbConn, "SELECT 1;", 5*time.Second)
+	if err != nil {
+		t.Fatalf("Explain SELECT 1: %v", err)
+	}
+	if len(strings.TrimSpace(plan)) == 0 {
+		t.Fatal("expected non-empty explain plan")
+	}
+	if !strings.Contains(plan, "Result") && !strings.Contains(plan, "cost=") {
+		t.Errorf("expected plan output to contain 'Result' or 'cost=', got %q", plan)
+	}
+}
+
+func TestTargetExplainDoesNotMutate(t *testing.T) {
+	mgr, dbConn, _ := setupTestTarget(t)
+	schema := createTestSchema(t, dbConn, mgr)
+	ctx := context.Background()
+
+	// Create table
+	createTableSQL := fmt.Sprintf("CREATE TABLE %s.items (id int);", schema)
+	if _, err := mgr.Run(ctx, dbConn, createTableSQL, 5*time.Second); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Explain INSERT
+	insertSQL := fmt.Sprintf("INSERT INTO %s.items (id) VALUES (42);", schema)
+	plan, err := mgr.Explain(ctx, dbConn, insertSQL, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Explain INSERT: %v", err)
+	}
+	if len(strings.TrimSpace(plan)) == 0 {
+		t.Fatal("expected non-empty explain plan")
+	}
+
+	// Verify table remains empty (due to rollback/read-only)
+	pool, err := mgr.Pool(ctx, dbConn)
+	if err != nil {
+		t.Fatalf("Pool: %v", err)
+	}
+
+	var count int
+	countSQL := fmt.Sprintf("SELECT count(*) FROM %s.items;", schema)
+	if err := pool.QueryRow(ctx, countSQL).Scan(&count); err != nil {
+		t.Fatalf("query count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 rows in %s.items after EXPLAIN INSERT, got %d", schema, count)
+	}
+}
+
+func TestTargetExplainDDL(t *testing.T) {
+	mgr, dbConn, _ := setupTestTarget(t)
+	ctx := context.Background()
+
+	// In PostgreSQL, EXPLAIN CREATE TABLE is invalid and should return an error
+	_, err := mgr.Explain(ctx, dbConn, "CREATE TABLE ddl_test (id int);", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error explaining DDL on target")
+	}
+
+	// Ensure error is sanitized
+	errStr := target.ErrorText(err)
+	if strings.Contains(errStr, "postgres://") {
+		t.Errorf("error leaks connection URL: %s", errStr)
+	}
+}

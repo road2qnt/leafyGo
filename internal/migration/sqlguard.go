@@ -263,3 +263,12 @@ func RejectTxControl(statements []string) error {
 	}
 	return nil
 }
+
+var reExplainable = regexp.MustCompile(`^(?i)(SELECT|INSERT|UPDATE|DELETE|MERGE|VALUES|WITH)\b`)
+
+// IsExplainable checks if the first statement keyword is one of SELECT, INSERT, UPDATE, DELETE, MERGE, VALUES, WITH.
+// Leading whitespace and comments are ignored.
+func IsExplainable(sql string) bool {
+	clean := StripLeadingCommentsAndWhitespace(sql)
+	return reExplainable.MatchString(clean)
+}

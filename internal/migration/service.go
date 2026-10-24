@@ -27,6 +27,7 @@ type HistoryStore interface {
 
 type Runner interface {
 	Run(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (time.Duration, error)
+	Explain(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (string, error)
 }
 
 const maxConcurrentMigrations = 2
@@ -69,6 +70,15 @@ type ExecuteInput struct {
 	DraftID uuid.UUID
 	Token   int
 	Title   string
+	SQL     string
+}
+
+type ExplainInput struct {
+	Actor   domain.User
+	DB      domain.DBConnection
+	Level   domain.AccessLevel
+	DraftID uuid.UUID
+	Token   int
 	SQL     string
 }
 
@@ -230,4 +240,58 @@ func (s *Service) ExecuteDraft(ctx context.Context, in ExecuteInput) (domain.Mig
 	}
 
 	return h, nil
+}
+
+func (s *Service) ExplainDraft(ctx context.Context, in ExplainInput) (string, error) {
+	// 1. Level check
+	if in.Level < domain.LevelEdit {
+		return "", ErrForbidden
+	}
+
+	// 2. Load draft
+	draft, err := s.store.GetMigrationDraft(ctx, in.DB.ID, in.DraftID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+
+	// 3. Token check
+	if in.Token != draft.Revision {
+		return "", ErrConflict
+	}
+
+	// 4. Lightweight validation
+	trimmedSQL := strings.TrimSpace(in.SQL)
+	if trimmedSQL == "" || (s.opts.MaxMigrationBytes > 0 && len(in.SQL) > s.opts.MaxMigrationBytes) || strings.ContainsRune(in.SQL, 0) {
+		return "", ErrValidation
+	}
+
+	// 5. Single statement check
+	stmts, err := Statements(in.SQL)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrValidation, err)
+	}
+	if len(stmts) != 1 {
+		return "", fmt.Errorf("%w: explain requires exactly one statement, got %d", ErrValidation, len(stmts))
+	}
+
+	// 6. Reject tx control
+	if err := RejectTxControl(stmts); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrValidation, err)
+	}
+
+	// 7. Check if explainable (DDL not supported message)
+	if !IsExplainable(stmts[0]) {
+		return "EXPLAIN tidak berlaku untuk DDL.", nil
+	}
+
+	// 8. Execute target explain
+	out, err := s.runner.Explain(ctx, in.DB, in.SQL, s.opts.MigrationTimeout)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrTarget, err)
+	}
+
+	return out, nil
 }

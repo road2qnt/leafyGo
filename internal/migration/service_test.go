@@ -132,8 +132,9 @@ func (m *mockHistoryStore) ReapStaleRunningMigrations(ctx context.Context, dbID 
 }
 
 type mockRunner struct {
-	runFunc func(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (time.Duration, error)
-	st      *mockHistoryStore
+	runFunc     func(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (time.Duration, error)
+	explainFunc func(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (string, error)
+	st          *mockHistoryStore
 }
 
 func (r *mockRunner) Run(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (time.Duration, error) {
@@ -146,6 +147,18 @@ func (r *mockRunner) Run(ctx context.Context, db domain.DBConnection, sql string
 		return r.runFunc(ctx, db, sql, timeout)
 	}
 	return 10 * time.Millisecond, nil
+}
+
+func (r *mockRunner) Explain(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (string, error) {
+	if r.st != nil {
+		r.st.mu.Lock()
+		r.st.calledRunner = true
+		r.st.mu.Unlock()
+	}
+	if r.explainFunc != nil {
+		return r.explainFunc(ctx, db, sql, timeout)
+	}
+	return "Seq Scan on users (cost=0.00..1.01 rows=1 width=32)", nil
 }
 
 func makeValidInput(dbID, draftID uuid.UUID) migration.ExecuteInput {
@@ -594,4 +607,287 @@ func TestSemaphoreBusyReturnsErrBusy(t *testing.T) {
 
 	// Unblock runners
 	close(blockCh)
+}
+
+func makeValidExplainInput(dbID, draftID uuid.UUID) migration.ExplainInput {
+	return migration.ExplainInput{
+		Actor: domain.User{
+			ID:       uuid.New(),
+			Username: "tester",
+		},
+		DB: domain.DBConnection{
+			ID:   dbID,
+			Name: "testdb",
+		},
+		Level:   domain.LevelEdit,
+		DraftID: draftID,
+		Token:   1,
+		SQL:     "SELECT * FROM test;",
+	}
+}
+
+func TestExplainViewOnlyForbidden(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 1}
+
+	in := makeValidExplainInput(dbID, draftID)
+	in.Level = domain.LevelView
+
+	_, err := svc.ExplainDraft(context.Background(), in)
+	if !errors.Is(err, migration.ErrForbidden) {
+		t.Fatalf("expected ErrForbidden for view-only level, got %v", err)
+	}
+	if st.calledRunner {
+		t.Error("expected runner to NOT be called for forbidden level")
+	}
+}
+
+func TestExplainTokenMismatch(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 2}
+
+	in := makeValidExplainInput(dbID, draftID)
+	in.Token = 1 // mismatch
+
+	_, err := svc.ExplainDraft(context.Background(), in)
+	if !errors.Is(err, migration.ErrConflict) {
+		t.Fatalf("expected ErrConflict for token mismatch, got %v", err)
+	}
+	if st.calledRunner {
+		t.Error("expected runner to NOT be called on conflict")
+	}
+}
+
+func TestExplainDraftNotFound(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New() // not in store
+
+	in := makeValidExplainInput(dbID, draftID)
+
+	_, err := svc.ExplainDraft(context.Background(), in)
+	if !errors.Is(err, migration.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing draft, got %v", err)
+	}
+}
+
+func TestExplainMultiStatementRejected(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 1}
+
+	// 1. Two statements
+	in := makeValidExplainInput(dbID, draftID)
+	in.SQL = "SELECT 1; SELECT 2;"
+	_, err := svc.ExplainDraft(context.Background(), in)
+	if !errors.Is(err, migration.ErrValidation) {
+		t.Fatalf("expected ErrValidation for multiple statements, got %v", err)
+	}
+
+	// 2. Zero statements
+	in2 := makeValidExplainInput(dbID, draftID)
+	in2.SQL = "; ; ;"
+	_, err2 := svc.ExplainDraft(context.Background(), in2)
+	if !errors.Is(err2, migration.ErrValidation) {
+		t.Fatalf("expected ErrValidation for empty/zero statements, got %v", err2)
+	}
+
+	if st.calledRunner {
+		t.Error("expected runner to NOT be called on multi-statement rejection")
+	}
+}
+
+func TestExplainTxControlRejected(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 1}
+
+	for _, stmt := range []string{"COMMIT;", "BEGIN;", "ROLLBACK;", "SAVEPOINT sp1;"} {
+		in := makeValidExplainInput(dbID, draftID)
+		in.SQL = stmt
+		_, err := svc.ExplainDraft(context.Background(), in)
+		if !errors.Is(err, migration.ErrValidation) {
+			t.Errorf("expected ErrValidation for %q, got %v", stmt, err)
+		}
+	}
+	if st.calledRunner {
+		t.Error("expected runner to NOT be called on tx-control rejection")
+	}
+}
+
+func TestExplainDDLMessage(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 1}
+
+	ddlStatements := []string{
+		"CREATE TABLE users (id int);",
+		"ALTER TABLE users ADD COLUMN name text;",
+		"DROP TABLE users;",
+		"TRUNCATE TABLE users;",
+		"CREATE INDEX idx_users ON users(id);",
+	}
+
+	for _, ddl := range ddlStatements {
+		t.Run(ddl, func(t *testing.T) {
+			st.calledRunner = false
+			in := makeValidExplainInput(dbID, draftID)
+			in.SQL = ddl
+
+			out, err := svc.ExplainDraft(context.Background(), in)
+			if err != nil {
+				t.Fatalf("expected nil error for DDL message, got %v", err)
+			}
+			if out != "EXPLAIN tidak berlaku untuk DDL." {
+				t.Errorf("expected DDL message 'EXPLAIN tidak berlaku untuk DDL.', got %q", out)
+			}
+			if st.calledRunner {
+				t.Error("expected runner to NOT be called for DDL")
+			}
+		})
+	}
+}
+
+func TestExplainFirstKeyword(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 1}
+
+	acceptedKeywords := []string{
+		"SELECT 1;",
+		"select * from test;",
+		"WITH cte AS (SELECT 1) SELECT * FROM cte;",
+		"with cte as (select 1) select 2;",
+		"INSERT INTO test (id) VALUES (1);",
+		"UPDATE test SET id = 2;",
+		"DELETE FROM test WHERE id = 1;",
+		"MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name='x';",
+		"VALUES (1), (2);",
+		// Leading comments
+		"-- line comment\nSELECT 42;",
+		"/* block comment */ INSERT INTO test VALUES (1);",
+		"/* nested /* comment */ */ WITH t AS (SELECT 1) SELECT * FROM t;",
+	}
+
+	for _, stmt := range acceptedKeywords {
+		t.Run("accept_"+stmt, func(t *testing.T) {
+			st.calledRunner = false
+			in := makeValidExplainInput(dbID, draftID)
+			in.SQL = stmt
+
+			out, err := svc.ExplainDraft(context.Background(), in)
+			if err != nil {
+				t.Fatalf("unexpected error for explainable keyword: %v", err)
+			}
+			if out == "EXPLAIN tidak berlaku untuk DDL." {
+				t.Errorf("expected query plan, got DDL rejection message for %q", stmt)
+			}
+			if !st.calledRunner {
+				t.Errorf("expected runner to be called for explainable query: %q", stmt)
+			}
+		})
+	}
+}
+
+func TestExplainDoesNotWriteHistory(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{st: st}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	initialDraft := domain.MigrationDraft{
+		ID:       draftID,
+		DBID:     dbID,
+		Title:    "Initial Draft",
+		SQLText:  "SELECT 1;",
+		Revision: 1,
+	}
+	st.drafts[draftID] = initialDraft
+
+	in := makeValidExplainInput(dbID, draftID)
+	in.SQL = "SELECT 2;"
+
+	out, err := svc.ExplainDraft(context.Background(), in)
+	if err != nil {
+		t.Fatalf("ExplainDraft failed: %v", err)
+	}
+	if out == "" {
+		t.Fatal("expected non-empty output")
+	}
+
+	// 1. Check no histories inserted
+	if len(st.histories) != 0 {
+		t.Errorf("expected 0 histories written, got %d", len(st.histories))
+	}
+	if st.calledInsertRunning {
+		t.Error("InsertRunningMigration was unexpectedly called")
+	}
+	if st.finishStatus != "" {
+		t.Errorf("FinishMigration was unexpectedly called with status %q", st.finishStatus)
+	}
+
+	// 2. Check draft revision unchanged
+	d := st.drafts[draftID]
+	if d.Revision != 1 {
+		t.Errorf("expected draft revision to remain 1, got %d", d.Revision)
+	}
+	if d.SQLText != "SELECT 1;" {
+		t.Errorf("expected draft SQLText to remain unchanged, got %q", d.SQLText)
+	}
+
+	// 3. Check locks
+	if st.locks != 0 {
+		t.Errorf("expected 0 locks held, got %d", st.locks)
+	}
+}
+
+func TestExplainTargetError(t *testing.T) {
+	st := newMockHistoryStore()
+	rn := &mockRunner{
+		st: st,
+		explainFunc: func(ctx context.Context, db domain.DBConnection, sql string, timeout time.Duration) (string, error) {
+			return "", errors.New("syntax error at or near xyz")
+		},
+	}
+	svc := migration.NewService(st, rn, migration.Options{})
+
+	dbID := uuid.New()
+	draftID := uuid.New()
+	st.drafts[draftID] = domain.MigrationDraft{ID: draftID, DBID: dbID, Revision: 1}
+
+	in := makeValidExplainInput(dbID, draftID)
+	_, err := svc.ExplainDraft(context.Background(), in)
+	if !errors.Is(err, migration.ErrTarget) {
+		t.Fatalf("expected ErrTarget for runner failure, got %v", err)
+	}
 }

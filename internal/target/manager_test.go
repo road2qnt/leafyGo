@@ -78,6 +78,15 @@ func TestDecryptFailureDoesNotLeakCiphertext(t *testing.T) {
 	if strings.Contains(testErr.Error(), string(corrupted)) {
 		t.Errorf("Test error leaks ciphertext: %s", testErr.Error())
 	}
+
+	// Test Explain
+	_, explainErr := mgr.Explain(ctx, db, "SELECT 1", 5*time.Second)
+	if explainErr == nil {
+		t.Fatal("expected Explain to fail on decryption failure")
+	}
+	if strings.Contains(explainErr.Error(), string(corrupted)) {
+		t.Errorf("Explain error leaks ciphertext: %s", explainErr.Error())
+	}
 }
 
 func TestStatementTimeoutBudgetCalculation(t *testing.T) {
@@ -118,5 +127,37 @@ func TestStatementTimeoutBudgetCalculation(t *testing.T) {
 	rem3 := calculateRemaining(ctx3, 30*time.Second)
 	if rem3 != time.Millisecond {
 		t.Errorf("expected minimum 1ms, got %v", rem3)
+	}
+}
+
+func TestExplainOutputTruncatedTo64KiB(t *testing.T) {
+	// 1. Smaller than 64 KiB is unchanged
+	small := "Seq Scan on users (cost=0.00..1.01 rows=1 width=32)"
+	if got := truncateToBytes(small, maxExplainOutputBytes); got != small {
+		t.Errorf("expected %q, got %q", small, got)
+	}
+
+	// 2. Exactly 64 KiB
+	exact := strings.Repeat("A", maxExplainOutputBytes)
+	if got := truncateToBytes(exact, maxExplainOutputBytes); len(got) != maxExplainOutputBytes {
+		t.Errorf("expected len=%d, got %d", maxExplainOutputBytes, len(got))
+	}
+
+	// 3. Larger than 64 KiB is truncated to exactly 64 KiB
+	large := strings.Repeat("B", maxExplainOutputBytes+1000)
+	gotLarge := truncateToBytes(large, maxExplainOutputBytes)
+	if len(gotLarge) != maxExplainOutputBytes {
+		t.Errorf("expected len=%d, got %d", maxExplainOutputBytes, len(gotLarge))
+	}
+
+	// 4. Truncation does not leave invalid UTF-8 (multibyte boundary)
+	prefix := strings.Repeat("X", maxExplainOutputBytes-1)
+	multi := prefix + "€€" // € is 3 bytes (0xE2, 0x82, 0xAC)
+	gotMulti := truncateToBytes(multi, maxExplainOutputBytes)
+	if len(gotMulti) > maxExplainOutputBytes {
+		t.Errorf("expected len <= %d, got %d", maxExplainOutputBytes, len(gotMulti))
+	}
+	if gotMulti != prefix {
+		t.Errorf("expected multibyte rune to not be sliced into invalid utf-8, got len %d", len(gotMulti))
 	}
 }

@@ -174,3 +174,63 @@ func TestRejectTxControl(t *testing.T) {
 		})
 	}
 }
+
+func TestIsExplainable(t *testing.T) {
+	valid := []string{
+		"SELECT 1;",
+		"select * from users;",
+		"WITH cte AS (SELECT 1) SELECT * FROM cte;",
+		"with cte as (select 1) select 2;",
+		"INSERT INTO users (id) VALUES (1);",
+		"insert into users values (2);",
+		"UPDATE users SET name='test';",
+		"update users set id=1;",
+		"DELETE FROM users WHERE id=1;",
+		"delete from users;",
+		"MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name=source.name;",
+		"merge into t using s on t.id = s.id when not matched then insert values (1);",
+		"VALUES (1, 'a'), (2, 'b');",
+		"values (1);",
+		// Leading comments and whitespace
+		"   \n\t  SELECT 1;",
+		"-- line comment\nSELECT 2;",
+		"/* block comment */ SELECT 3;",
+		"/* outer /* inner */ */ SELECT 4;",
+		"-- comment 1\n/* comment 2 */\n\n  INSERT INTO t VALUES (1);",
+	}
+
+	for _, stmt := range valid {
+		t.Run("valid_"+stmt, func(t *testing.T) {
+			if !IsExplainable(stmt) {
+				t.Errorf("expected statement to be explainable: %q", stmt)
+			}
+		})
+	}
+
+	invalid := []string{
+		"CREATE TABLE test (id int);",
+		"create index idx on test(id);",
+		"ALTER TABLE test ADD COLUMN name text;",
+		"DROP TABLE test;",
+		"TRUNCATE TABLE test;",
+		"GRANT ALL ON test TO public;",
+		"REVOKE ALL ON test FROM public;",
+		"VACUUM FULL;",
+		"ANALYZE test;",
+		"SET search_path TO test;",
+		"SELECTING 1;", // word boundary check: "SELECTING" is not "SELECT"
+		"UPDATER set a=1;",
+		"",
+		"   ",
+		"-- only comment\n",
+		"/* only block comment */",
+	}
+
+	for _, stmt := range invalid {
+		t.Run("invalid_"+stmt, func(t *testing.T) {
+			if IsExplainable(stmt) {
+				t.Errorf("expected statement to NOT be explainable: %q", stmt)
+			}
+		})
+	}
+}
