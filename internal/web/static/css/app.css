@@ -210,7 +210,7 @@ hr { border: 0; border-top: var(--border); margin: var(--space-6) 0; }
   border-color: var(--ink);
 }
 
-.site-user { position: relative; margin-left: auto; font-size: var(--text-sm); }
+.site-user { position: relative; margin-left: auto; }
 .site-user__toggle {
   display: inline-flex;
   align-items: center;
@@ -240,6 +240,7 @@ hr { border: 0; border-top: var(--border); margin: var(--space-6) 0; }
   right: 0;
   z-index: 20;
   min-width: 10rem;
+  font-size: var(--text-sm);
   background: var(--paper);
   border: var(--border);
   box-shadow: var(--shadow);
