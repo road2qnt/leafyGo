@@ -1,29 +1,59 @@
 {{define "layout"}}<!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
 <title>{{.Title}} · leafyGo</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/img/favicon.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/css/app.css">
+<script src="/static/js/app.js" defer></script>
+<script src="/static/js/editor.js" defer></script>
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="/">leafyGo</a>
-  <nav>
+<a class="skip-link" href="#main">Skip to main content</a>
+{{if not .NoHeader}}
+<header class="site-header">
+  <div class="container site-header__inner">
+    <a class="brand" href="{{if and .User .User.IsPlatformAdmin}}/admin/users{{else}}/{{end}}" aria-label="leafyGo home">
+      <span class="brand__mark">{{template "leafIcon"}}</span>
+      <span>leafy<span class="brand__go">Go</span></span>
+    </a>
     {{if .User}}
-      <span class="user">{{.User.Username}}{{if .User.IsPlatformAdmin}} · admin{{end}}</span>
-      <form class="inline" method="post" action="/logout">
-        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <button type="submit">Keluar</button>
-      </form>
-    {{else}}
-      <a href="/login">Masuk</a>
+    {{/* Logo sudah me-link ke dashboard user biasa. */}}
+    {{if .User.IsPlatformAdmin}}
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="/admin/users"{{if eq .Nav "admin-users"}} aria-current="page"{{end}}>Users</a></li>
+        <li><a href="/admin/groups"{{if eq .Nav "admin-groups"}} aria-current="page"{{end}}>Groups</a></li>
+        <li><a href="/admin/databases"{{if eq .Nav "admin-databases"}} aria-current="page"{{end}}>Connections</a></li>
+      </ul>
+    </nav>
     {{end}}
-  </nav>
+    <details class="site-user" data-dropdown>
+      <summary class="site-user__toggle">{{template "icon" "user"}}<span class="visually-hidden">Account menu, signed in as </span><span class="site-user__name">{{.User.Username}}</span></summary>
+      <div class="site-user__menu">
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+          <button class="site-user__item" type="submit">{{template "icon" "sign-out"}}Sign out</button>
+        </form>
+      </div>
+    </details>
+    {{end}}
+  </div>
 </header>
-{{if .Flash}}<p class="flash flash--{{.Flash.Kind}}">{{.Flash.Message}}</p>{{end}}
-<main>
+{{end}}
+{{if and .Flash (not .NoHeader)}}
+<div class="container flash-region">
+  {{template "flash" .Flash}}
+</div>
+{{end}}
+<main id="main" class="site-main" tabindex="-1">
+  <div class="container">
 {{template "content" .}}
+  </div>
 </main>
 </body>
 </html>

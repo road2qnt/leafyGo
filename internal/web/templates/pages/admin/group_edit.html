@@ -1,0 +1,163 @@
+{{define "content"}}
+{{$root := .}}
+{{with .Data}}
+{{$view := .}}
+{{$g := .Group}}
+{{/* Breadcrumb */}}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="/admin/groups">Groups</a></li>
+    <li><span aria-current="page">{{$g.Name}}</span></li>
+  </ol>
+</nav>
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    <h1>{{$g.Name}}</h1>
+    {{with $g.Description}}<p class="page-header__meta muted">{{.}}</p>{{end}}
+  </div>
+</div>
+
+<div class="stack--lg">
+  {{/* Detail dan anggota */}}
+  <div class="columns">
+    {{/* Form detail grup */}}
+    <section class="card" aria-labelledby="details-title">
+      <h2 id="details-title" class="section-title">Details</h2>
+      {{template "formError" .Form}}
+      <form class="form" method="post" action="/admin/groups/{{$g.ID}}" novalidate>
+        <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+        {{template "groupFields" dict "prefix" "group" "values" .Form.Values "errors" .Form.Errors}}
+        <div class="form__actions">
+          <button class="btn btn--primary" type="submit">Save details</button>
+        </div>
+      </form>
+    </section>
+
+    {{/* Anggota grup */}}
+    <section class="card" aria-labelledby="members-title">
+      <h2 id="members-title" class="section-title">Members</h2>
+      <p class="field__hint">Adding or removing a member signs that user out so their new access applies right away.</p>
+      {{if $g.Members}}
+      <ul class="chip-list" role="list">
+        {{range $g.Members}}
+        <li class="chip">
+          <span>{{.Username}}</span>
+          <form class="inline" method="post" action="/admin/groups/{{$g.ID}}/members">
+            <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+            <input type="hidden" name="action" value="remove">
+            <input type="hidden" name="user_id" value="{{.ID}}">
+            <button class="chip__remove" type="submit" aria-label="Remove {{.Username}} from {{$g.Name}}">×</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p class="muted">No members yet.</p>
+      {{end}}
+      {{/* Form tambah anggota */}}
+      {{if $view.Users}}
+      <form class="inline-form" method="post" action="/admin/groups/{{$g.ID}}/members">
+        <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+        <input type="hidden" name="action" value="add">
+        <div class="field">
+          <label class="field__label" for="add-member">Add member</label>
+          <select class="select" id="add-member" name="user_id" aria-describedby="add-member-hint" required>
+            <option value="">Choose a user</option>
+            {{range $view.Users}}<option value="{{.ID}}">{{.Username}}</option>{{end}}
+          </select>
+        </div>
+        <button class="btn" type="submit">Add member</button>
+      </form>
+      <p class="field__hint" id="add-member-hint">Platform Admins cannot join groups.</p>
+      {{else}}
+      <p class="field__hint">Every user is already a member.</p>
+      {{end}}
+    </section>
+  </div>
+
+  {{/* Akses database grup */}}
+  <section class="card" aria-labelledby="access-title">
+    <h2 id="access-title" class="section-title">Database access</h2>
+    <p class="field__hint">Changing access signs out the group's members so their new access applies right away.</p>
+    {{if $g.Access}}
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="access-title">
+      <table class="table">
+        <thead>
+          <tr><th scope="col">Database</th><th scope="col" class="shrink">Level</th><th scope="col">Actions</th></tr>
+        </thead>
+        <tbody>
+          {{range $g.Access}}
+          <tr>
+            <th scope="row">{{.DBName}}</th>
+            <td class="shrink">
+              <form class="inline-controls" method="post" action="/admin/groups/{{$g.ID}}/access">
+                <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+                <input type="hidden" name="db_id" value="{{.DBID}}">
+                <label class="visually-hidden" for="lvl-{{.DBID}}">Access level on {{.DBName}}</label>
+                <select class="select select--sm" id="lvl-{{.DBID}}" name="level">
+                  <option value="view"{{if not .Level.CanEdit}} selected{{end}}>View Only</option>
+                  <option value="edit"{{if .Level.CanEdit}} selected{{end}}>View + Edit</option>
+                </select>
+                <button class="btn btn--sm" type="submit">Save<span class="visually-hidden"> level on {{.DBName}}</span></button>
+              </form>
+            </td>
+            <td class="actions">
+              <form class="inline" method="post" action="/admin/groups/{{$g.ID}}/access">
+                <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+                <input type="hidden" name="db_id" value="{{.DBID}}">
+                <input type="hidden" name="level" value="none">
+                <button class="btn btn--sm btn--danger" type="submit">Revoke<span class="visually-hidden"> access on {{.DBName}}</span></button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="muted">No database access yet.</p>
+    {{end}}
+    {{/* Form beri akses */}}
+    {{if $view.Databases}}
+    <form class="inline-form" method="post" action="/admin/groups/{{$g.ID}}/access">
+      <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+      <div class="field">
+        <label class="field__label" for="grant-db">Grant access to</label>
+        <select class="select" id="grant-db" name="db_id" required>
+          <option value="">Choose a database</option>
+          {{range $view.Databases}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label" for="grant-level">Level</label>
+        <select class="select" id="grant-level" name="level">
+          <option value="view">View Only</option>
+          <option value="edit">View + Edit</option>
+        </select>
+      </div>
+      <button class="btn" type="submit">Grant access</button>
+    </form>
+    {{else if $g.Access}}
+    <p class="field__hint">This group already has access to every connection.</p>
+    {{else}}
+    <p class="field__hint">No connections exist yet. <a href="/admin/databases/new">Add a connection</a> first.</p>
+    {{end}}
+  </section>
+
+  {{/* Hapus grup */}}
+  <section class="card card--danger" aria-labelledby="delete-title">
+    <h2 id="delete-title" class="section-title">Delete group</h2>
+    <p>Group <strong>{{$g.Name}}</strong> and its memberships and access grants will be deleted. Its members are signed out. The databases themselves are untouched.</p>
+    <details class="disclosure disclosure--danger">
+      <summary>{{template "icon" "trash"}}Delete {{$g.Name}}</summary>
+      <form class="disclosure__body" method="post" action="/admin/groups/{{$g.ID}}/delete">
+        <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+        <p>This cannot be undone.</p>
+        <button class="btn btn--sm btn--danger" type="submit">Yes, delete group</button>
+      </form>
+    </details>
+  </section>
+</div>
+{{end}}
+{{end}}

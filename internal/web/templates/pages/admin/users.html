@@ -1,0 +1,124 @@
+{{define "content"}}
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    <h1>Users</h1>
+  </div>
+</div>
+{{$root := .}}
+{{with .Data}}
+{{$view := .}}
+{{/* Daftar user dan panel samping */}}
+<div class="split">
+  {{/* Daftar user */}}
+  <section aria-labelledby="users-caption">
+    {{if .Users}}
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="users-caption">
+      <table class="table">
+        <caption id="users-caption">{{count .UserCount "user" "users"}}, {{count .AdminCount "admin" "admins"}}</caption>
+        <thead>
+          <tr>
+            <th scope="col">User</th>
+            <th scope="col">Status</th>
+            <th scope="col">Groups</th>
+            <th scope="col" class="actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Users}}
+          {{$editing := and $view.Editing (eq $view.Editing.ID.String .ID.String)}}
+          <tr{{if $editing}} class="is-selected"{{end}}>
+            <th scope="row">
+              {{.Username}}{{if eq .ID.String $root.User.ID.String}} <span class="muted text-sm">(you)</span>{{end}}
+              <span class="cell-meta">{{if .IsPlatformAdmin}}Platform Admin{{else}}User{{end}} · created <time datetime="{{isoTime .CreatedAt}}">{{formatTime .CreatedAt}}</time></span>
+            </th>
+            <td>{{if .IsActive}}Active{{else}}<span class="muted">Inactive</span>{{end}}</td>
+            <td>{{if .IsPlatformAdmin}}<span class="muted">Not applicable</span>{{else if .Groups}}{{range $i, $g := .Groups}}{{if $i}}, {{end}}<a href="/admin/groups/{{$g.ID}}">{{$g.Name}}</a>{{end}}{{else}}<span class="muted">None</span>{{end}}</td>
+            <td class="actions"><a class="btn btn--sm" href="/admin/users?edit={{.ID}}#user-form"{{if $editing}} aria-current="true"{{end}}>Manage<span class="visually-hidden"> {{.Username}}</span></a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    {{/* Kosong: belum ada user */}}
+    <div class="empty-state">
+      <h2 class="empty-state__title" id="users-caption">No users yet</h2>
+      <p>Add the first user with the form beside this list.</p>
+    </div>
+    {{end}}
+  </section>
+
+  {{/* Panel samping: kelola user atau tambah user */}}
+  <section class="card sticky-aside{{if .Editing}} card--sections{{end}}" id="user-form" aria-labelledby="user-form-title">
+    {{with .Editing}}
+    {{$self := eq .ID.String $root.User.ID.String}}
+    {{$lastAdmin := and .IsPlatformAdmin .IsActive (le $view.ActiveAdmins 1)}}
+    <div>
+      <h2 id="user-form-title" class="card__title">Manage {{.Username}}{{if $self}} <span class="muted text-sm">(you)</span>{{end}}</h2>
+      <p class="muted text-sm">{{if .IsPlatformAdmin}}Platform Admin{{else}}User{{end}} · {{if .IsActive}}active{{else}}inactive{{end}}</p>
+    </div>
+
+    {{/* Reset password */}}
+    <form class="form" method="post" action="/admin/users/{{.ID}}/password" novalidate>
+      <h3 class="section-title">Reset password</h3>
+      {{template "formError" $view.Form}}
+      <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+      {{$hint := "All active sessions of this user will end."}}
+      {{if $self}}{{$hint = "You will be asked to sign in again."}}{{end}}
+      {{template "field" dict "id" "reset-password" "name" "password" "label" "New password" "type" "password" "error" (index $view.Form.Errors "password") "hint" (printf "At least 8 characters. %s" $hint) "autocomplete" "new-password" "required" true}}
+      <div><button class="btn btn--primary" type="submit">Save password</button></div>
+    </form>
+
+    {{/* Status akun */}}
+    <div class="stack-sm">
+      <h3 class="section-title">Account status</h3>
+      {{if $lastAdmin}}
+      <p class="field__hint">The last active admin cannot be deactivated.</p>
+      {{else if $self}}
+      <p class="field__hint">You cannot deactivate your own account.</p>
+      {{else if .IsActive}}
+      <details class="disclosure disclosure--danger">
+        <summary>Deactivate {{.Username}}</summary>
+        <form class="disclosure__body" method="post" action="/admin/users/{{.ID}}/active">
+          <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+          <input type="hidden" name="active" value="false">
+          <p><strong>{{.Username}}</strong> can no longer sign in, and all active sessions end. You can activate the account again later.</p>
+          <button class="btn btn--danger" type="submit">Yes, deactivate</button>
+        </form>
+      </details>
+      {{else}}
+      <form method="post" action="/admin/users/{{.ID}}/active">
+        <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+        <input type="hidden" name="active" value="true">
+        <button class="btn" type="submit" aria-describedby="activate-hint">Activate {{.Username}}</button>
+      </form>
+      <p class="field__hint" id="activate-hint">{{.Username}} will be able to sign in again.</p>
+      {{end}}
+    </div>
+
+    <div><a class="btn btn--ghost" href="/admin/users">Close</a></div>
+    {{else}}
+    {{/* Form tambah user */}}
+    <h2 id="user-form-title" class="card__title">Add user</h2>
+    {{template "formError" .Form}}
+    <form class="form" method="post" action="/admin/users" novalidate>
+      <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+      {{template "field" dict "name" "username" "label" "Username" "value" (index .Form.Values "username") "error" (index .Form.Errors "username") "hint" "3 to 64 characters: letters, digits, dots, underscores, or hyphens." "autocomplete" "off" "required" true}}
+      {{template "field" dict "name" "password" "label" "Password" "type" "password" "error" (index .Form.Errors "password") "hint" "At least 8 characters." "autocomplete" "new-password" "required" true}}
+      <div class="field">
+        <label class="check">
+          <input type="checkbox" name="is_admin" value="true" aria-describedby="f-is-admin-hint"{{if eq (index .Form.Values "is_admin") "true"}} checked{{end}}>
+          <span>Create as Platform Admin</span>
+        </label>
+        <p class="field__hint" id="f-is-admin-hint">Permanent. Platform Admins only manage the platform and cannot access databases.</p>
+      </div>
+      <div class="form__actions">
+        <button class="btn btn--primary" type="submit">Add user</button>
+      </div>
+    </form>
+    {{end}}
+  </section>
+</div>
+{{end}}
+{{end}}

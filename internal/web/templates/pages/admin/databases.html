@@ -1,0 +1,60 @@
+{{define "content"}}
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    <h1>Connections</h1>
+  </div>
+  {{if .Data.Databases}}
+  <div class="page-header__actions">
+    <a class="btn btn--primary" href="/admin/databases/new">{{template "icon" "plus"}}Add connection</a>
+  </div>
+  {{end}}
+</div>
+{{$root := .}}
+{{with .Data}}
+{{/* Daftar koneksi */}}
+<section aria-labelledby="conn-caption">
+  {{if .Databases}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="conn-caption">
+    <table class="table">
+      <caption id="conn-caption">{{count (len .Databases) "connection" "connections"}}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Endpoint</th>
+          <th scope="col" class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Databases}}
+        <tr>
+          <th scope="row"><a href="/admin/databases/{{.ID}}">{{.Name}}</a></th>
+          <td>
+            <span class="mono wrap-anywhere">{{.Username}}@{{.Host}}:{{.Port}}/{{.DBName}}</span>
+            <span class="cell-meta">SSL {{.SSLMode}} · updated <time datetime="{{isoTime .UpdatedAt}}">{{formatTime .UpdatedAt}}</time></span>
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <form class="inline" method="post" action="/admin/databases/{{.ID}}/test">
+                <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+                <button class="btn btn--sm" type="submit">Test connection<span class="visually-hidden"> {{.Name}}</span></button>
+              </form>
+              <a class="btn btn--sm" href="/admin/databases/{{.ID}}">Edit<span class="visually-hidden"> {{.Name}}</span></a>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  {{/* Kosong: belum ada koneksi */}}
+  <div class="empty-state">
+    <h2 class="empty-state__title" id="conn-caption">No connections yet</h2>
+    <p>Register the first PostgreSQL database so groups can be granted access to it.</p>
+    <p><a class="btn btn--primary" href="/admin/databases/new">{{template "icon" "plus"}}Add connection</a></p>
+  </div>
+  {{end}}
+</section>
+{{end}}
+{{end}}

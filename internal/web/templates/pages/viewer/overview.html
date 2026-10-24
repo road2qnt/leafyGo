@@ -1,0 +1,72 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeader" .}}
+{{$root := .}}
+{{with .Data}}
+<div class="stack--lg">
+  {{/* Peringatan target tidak terhubung */}}
+  {{with .TargetError}}
+  <div class="alert alert--error" role="alert">
+    <div>
+      <p class="alert__title">Cannot connect to the database</p>
+      <p>{{.}}</p>
+      <p class="text-sm">Schema and data are unavailable for now. Migration history is still available.</p>
+    </div>
+  </div>
+  {{end}}
+  {{/* Kartu statistik */}}
+  <div class="grid grid--stats">
+    <div class="card stat">
+      <p class="stat__label">Target status</p>
+      <p class="stat__value">{{if .TargetError}}<span class="status-text status-text--failed">Unreachable</span>{{else}}<span class="status-text status-text--success">Connected</span>{{end}}</p>
+    </div>
+    <div class="card stat">
+      <p class="stat__label">Tables and views</p>
+      <p class="stat__value">{{if .TargetError}}-{{else}}{{formatInt .TableCount}}{{end}}</p>
+    </div>
+    <div class="card stat">
+      <p class="stat__label">Latest version</p>
+      <p class="stat__value">{{with .LatestMigration}}v{{.Version}}{{else}}-{{end}}</p>
+    </div>
+  </div>
+
+  {{/* Detail database dan migrasi terakhir */}}
+  <div class="split">
+    {{/* Detail database */}}
+    <section class="card" aria-labelledby="identity-title">
+      <h2 id="identity-title" class="card__title">Database details</h2>
+      <dl class="dl">
+        <dt>Name</dt><dd>{{.DB.Name}}</dd>
+        <dt>Database</dt><dd class="mono">{{.DB.DBName}}</dd>
+        <dt>Host</dt><dd class="mono">{{.DB.Host}}:{{.DB.Port}}</dd>
+        <dt>Access level</dt><dd>{{levelLabel $root.Level}}</dd>
+      </dl>
+      {{if not .TargetError}}
+      <div class="card__footer">
+        <a class="btn btn--sm" href="/databases/{{$root.DB.ID}}/schema">View schema</a>
+        <a class="btn btn--sm" href="/databases/{{$root.DB.ID}}/data">Browse data</a>
+      </div>
+      {{end}}
+    </section>
+
+    {{/* Migrasi terakhir */}}
+    <section class="card" aria-labelledby="last-migration-title">
+      <h2 id="last-migration-title" class="card__title">Latest migration</h2>
+      {{with .LatestMigration}}
+      <p class="cluster"><a href="/databases/{{$root.DB.ID}}/migrations?migration={{.ID}}"><strong class="mono">v{{.Version}}</strong></a> {{template "statusText" .Status}}</p>
+      <dl class="dl text-sm">
+        <dt>Executed by</dt><dd>{{or .ExecutedByName "-"}}</dd>
+        <dt>Started</dt><dd><time datetime="{{isoTime .StartedAt}}">{{formatTime .StartedAt}}</time></dd>
+        <dt>Duration</dt><dd>{{formatDuration .DurationMs}}</dd>
+      </dl>
+      {{else}}
+      <p class="muted">No migrations on this database yet.</p>
+      {{end}}
+      <div class="card__footer">
+        <a class="btn btn--sm" href="/databases/{{$root.DB.ID}}/migrations">View history</a>
+      </div>
+    </section>
+  </div>
+</div>
+{{end}}
+{{end}}

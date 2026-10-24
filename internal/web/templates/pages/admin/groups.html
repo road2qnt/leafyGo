@@ -1,0 +1,60 @@
+{{define "content"}}
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    <h1>Groups and access</h1>
+  </div>
+  {{if .Data.Groups}}
+  <div class="page-header__actions">
+    <a class="btn btn--primary" href="/admin/groups/new">{{template "icon" "plus"}}Create group</a>
+  </div>
+  {{end}}
+</div>
+{{with .Data}}
+{{/* Daftar grup */}}
+<section aria-labelledby="groups-caption">
+  {{if .Groups}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="groups-caption">
+    <table class="table">
+      <caption id="groups-caption">{{count (len .Groups) "group" "groups"}}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Group</th>
+          <th scope="col">Members</th>
+          <th scope="col">Database access</th>
+          <th scope="col" class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Groups}}
+        <tr>
+          <th scope="row">
+            <a href="/admin/groups/{{.ID}}">{{.Name}}</a>
+            {{with .Description}}<span class="cell-meta">{{.}}</span>{{end}}
+          </th>
+          <td>{{if .Members}}{{range $i, $m := .Members}}{{if $i}}, {{end}}{{$m.Username}}{{end}}{{else}}<span class="muted">None</span>{{end}}</td>
+          <td>
+            {{if .Access}}
+            <dl class="access-summary">
+              {{with .AccessNames true}}<div><dt>View + Edit</dt><dd>{{join . ", "}}</dd></div>{{end}}
+              {{with .AccessNames false}}<div><dt>View Only</dt><dd>{{join . ", "}}</dd></div>{{end}}
+            </dl>
+            {{else}}<span class="muted">None</span>{{end}}
+          </td>
+          <td class="actions"><a class="btn btn--sm" href="/admin/groups/{{.ID}}">Manage<span class="visually-hidden"> {{.Name}}</span></a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  {{/* Kosong: belum ada grup */}}
+  <div class="empty-state">
+    <h2 class="empty-state__title" id="groups-caption">No groups yet</h2>
+    <p>Create a group, add members, then grant it database access.</p>
+    <p><a class="btn btn--primary" href="/admin/groups/new">{{template "icon" "plus"}}Create group</a></p>
+  </div>
+  {{end}}
+</section>
+{{end}}
+{{end}}

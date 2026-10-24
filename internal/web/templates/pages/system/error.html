@@ -1,0 +1,10 @@
+{{define "content"}}
+<div class="status-page stack">
+  <h1>Something went wrong</h1>
+  {{/* Pesan error */}}
+  <div class="alert alert--error" role="alert">
+    <p>{{.Message}}</p>
+  </div>
+  <p><a class="btn" href="{{if and .User .User.IsPlatformAdmin}}/admin/users{{else}}/{{end}}">Back to start</a></p>
+</div>
+{{end}}

@@ -1,0 +1,100 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeader" .}}
+{{$root := .}}
+{{with .Data}}
+<div class="stack">
+{{/* Peringatan */}}
+{{with .Notice}}<div class="alert alert--warning" role="status"><p>{{.}}</p></div>{{end}}
+{{/* Isi tabel terpilih */}}
+{{with .Page}}
+<div class="stack">
+  {{/* Judul tabel */}}
+  <div class="detail-header">
+    <h2 class="detail-title mono">{{.Schema}}.{{.Table}}</h2>
+    {{with .EstimatedRows}}<p class="detail-header__meta muted text-sm">About {{formatInt .}} rows</p>{{end}}
+  </div>
+  {{/* Catatan urutan baris */}}
+  {{with .OrderNote}}<div class="alert alert--info" role="note"><p>{{.}}</p></div>{{end}}
+  {{/* Tabel data */}}
+  {{if .Rows}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="data-caption">
+    <table class="table table--data">
+      <caption id="data-caption">Page {{.Page}}, {{count (len .Rows) "row" "rows"}}</caption>
+      <thead>
+        <tr>{{range .Columns}}<th scope="col">{{.}}</th>{{end}}</tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr>{{range .}}<td{{if gt (len .Text) 200}} title="Value truncated for display"{{end}}>{{if .IsNull}}<span class="cell-null">NULL</span>{{else if eq .Text ""}}<span class="cell-null">''<span class="visually-hidden"> (empty string)</span></span>{{else}}{{truncate .Text 200}}{{end}}</td>{{end}}</tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  {{/* Kosong: tidak ada baris */}}
+  <div class="empty-state">
+    <h3 class="empty-state__title">No rows</h3>
+    <p>{{if gt .Page 1}}This page is past the last row.{{else}}This table has no rows yet.{{end}}</p>
+  </div>
+  {{end}}
+  {{$page := .}}
+  {{/* Paginasi */}}
+  <nav class="pagination" aria-label="Data pages">
+    {{if gt .Page 1}}
+    <a class="btn btn--sm" href="?schema={{.Schema}}&amp;table={{.Table}}&amp;page={{sub .Page 1}}&amp;limit={{.PageSize}}" rel="prev">{{template "icon" "chevron-left"}}Previous</a>
+    {{else}}
+    <span class="btn btn--sm" aria-disabled="true">{{template "icon" "chevron-left"}}Previous</span>
+    {{end}}
+    <ul class="pagination__pages" role="list">
+      {{range pageLinks .Page .PageSize .HasNext .EstimatedRows}}
+      {{if .Gap}}
+      <li><span class="pagination__gap" aria-hidden="true">…</span></li>
+      {{else if .Current}}
+      <li><span class="pagination__page" aria-current="page"><span class="visually-hidden">Page </span>{{.Number}}</span></li>
+      {{else}}
+      <li><a class="pagination__page" href="?schema={{$page.Schema}}&amp;table={{$page.Table}}&amp;page={{.Number}}&amp;limit={{$page.PageSize}}"><span class="visually-hidden">Page </span>{{.Number}}</a></li>
+      {{end}}
+      {{end}}
+    </ul>
+    {{if .HasNext}}
+    <a class="btn btn--sm" href="?schema={{.Schema}}&amp;table={{.Table}}&amp;page={{add .Page 1}}&amp;limit={{.PageSize}}" rel="next">Next{{template "icon" "chevron-right"}}</a>
+    {{else}}
+    <span class="btn btn--sm" aria-disabled="true">Next{{template "icon" "chevron-right"}}</span>
+    {{end}}
+  </nav>
+  {{/* Tautan lanjutan */}}
+  <p><a href="/databases/{{$root.DB.ID}}/data">Choose another table</a> · <a href="/databases/{{$root.DB.ID}}/schema?schema={{.Schema}}&amp;table={{.Table}}">View structure</a></p>
+</div>
+{{else}}
+{{/* Pilih tabel (belum ada yang dipilih) */}}
+<section aria-labelledby="pick-caption">
+  {{if .Tables}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="pick-caption">
+    <table class="table">
+      <caption id="pick-caption">Choose a table to browse. Data is read only.</caption>
+      <thead><tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Estimated rows</th></tr></thead>
+      <tbody>
+        {{range .Tables}}
+        <tr>
+          <td class="mono">{{.Schema}}</td>
+          <th scope="row" class="mono">{{if .CanSelect}}<a href="/databases/{{$root.DB.ID}}/data?schema={{.Schema}}&amp;table={{.Name}}">{{.Name}}</a>{{else}}{{.Name}} <span class="muted text-sm">(no SELECT permission)</span>{{end}}</th>
+          <td>{{relkindLabel .Kind}}</td>
+          <td class="num">{{template "estimatedRows" .EstimatedRows}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  {{/* Kosong: tidak ada tabel */}}
+  <div class="empty-state">
+    <h2 class="empty-state__title" id="pick-caption">No tables yet</h2>
+    <p>There are no tables to show.</p>
+  </div>
+  {{end}}
+</section>
+{{end}}
+</div>
+{{end}}
+{{end}}

@@ -1,0 +1,42 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeaderWith" dict "page" . "action" .Data.Drafts}}
+{{$root := .}}
+{{with .Data}}
+{{/* Daftar draft */}}
+<section aria-labelledby="drafts-caption">
+  {{if .Drafts}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="drafts-caption">
+    <table class="table">
+      <caption id="drafts-caption">{{count (len .Drafts) "draft" "drafts"}}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col" class="num">Revision</th>
+          <th scope="col">Created by</th>
+          <th scope="col">Last updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Drafts}}
+        <tr>
+          <th scope="row"><a href="/databases/{{$root.DB.ID}}/migrations/drafts/{{.ID}}">{{or .Title "Untitled draft"}}</a></th>
+          <td class="num">{{.Revision}}</td>
+          <td>{{or .CreatedByName "-"}}</td>
+          <td class="nowrap"><time datetime="{{isoTime .UpdatedAt}}">{{formatTime .UpdatedAt}}</time>{{with .UpdatedByName}} <span class="muted">by {{.}}</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  {{/* Kosong: belum ada draft */}}
+  <div class="empty-state">
+    <h2 class="empty-state__title" id="drafts-caption">No drafts</h2>
+    <p>A draft holds migration SQL before it runs. Drafts that execute successfully leave this list.</p>
+    <p><a class="btn btn--primary" href="/databases/{{$root.DB.ID}}/migrations/new">{{template "icon" "plus"}}Create draft</a></p>
+  </div>
+  {{end}}
+</section>
+{{end}}
+{{end}}

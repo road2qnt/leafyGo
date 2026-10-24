@@ -25,7 +25,7 @@ import (
 	"leafygo/internal/store"
 )
 
-//go:embed templates/*.html templates/pages/*.html static/*
+//go:embed templates/*.html templates/pages/*/*.html templates/partials/*.html static/*
 var assets embed.FS
 
 type Server struct {
@@ -73,6 +73,11 @@ func (s *Server) Handler() http.Handler {
 	}
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
+	if s.cfg.UIPreview {
+		r.Get("/_preview", s.handlePreviewIndex)
+		r.Get("/_preview/{key}", s.handlePreview)
+	}
+
 	r.Get("/login", s.handleLoginGet)
 	r.Post("/login", s.handleLoginPost)
 
@@ -107,10 +112,10 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		s.renderError(w, r, http.StatusNotFound, "Halaman tidak ditemukan.")
+		s.renderError(w, r, http.StatusNotFound, "Page not found.")
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		s.renderError(w, r, http.StatusMethodNotAllowed, "Metode request tidak diizinkan.")
+		s.renderError(w, r, http.StatusMethodNotAllowed, "Request method not allowed.")
 	})
 
 	return r
@@ -118,9 +123,9 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) stubNotImplemented(what string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		s.render(w, r, http.StatusNotImplemented, "stub.html", pageData{
-			Title:   "Belum diimplementasi",
-			Message: "Bagian " + what + " belum diimplementasi pada slice ini.",
+		s.render(w, r, http.StatusNotImplemented, "system/stub.html", pageData{
+			Title:   "Not implemented",
+			Message: "The " + what + " section is not implemented in this slice yet.",
 		})
 	}
 }
@@ -191,11 +196,11 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 		}
 		sess := currentSession(r)
 		if sess == nil {
-			s.renderError(w, r, http.StatusForbidden, "Sesi tidak valid.")
+			s.renderError(w, r, http.StatusForbidden, "Invalid session.")
 			return
 		}
 		if err := r.ParseForm(); err != nil {
-			s.renderError(w, r, http.StatusBadRequest, "Form tidak valid.")
+			s.renderError(w, r, http.StatusBadRequest, "Invalid form.")
 			return
 		}
 		token := r.FormValue("csrf_token")
@@ -203,7 +208,7 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 			token = r.Header.Get("X-CSRF-Token")
 		}
 		if !constantTimeEqual(token, sess.CSRFToken) {
-			s.renderError(w, r, http.StatusForbidden, "Token CSRF tidak valid. Muat ulang halaman lalu coba lagi.")
+			s.renderError(w, r, http.StatusForbidden, "Invalid CSRF token. Reload the page and try again.")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -214,7 +219,7 @@ func (s *Server) requirePlatformAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := currentUser(r)
 		if user == nil || !user.IsPlatformAdmin {
-			s.renderError(w, r, http.StatusForbidden, "Halaman ini hanya untuk Platform Admin.")
+			s.renderError(w, r, http.StatusForbidden, "This page is for Platform Admins only.")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -231,27 +236,27 @@ func (s *Server) requireDBLevel(required domain.AccessLevel) func(http.Handler) 
 			}
 			id, err := uuid.Parse(chi.URLParam(r, "id"))
 			if err != nil {
-				s.renderError(w, r, http.StatusNotFound, "Database tidak ditemukan.")
+				s.renderError(w, r, http.StatusNotFound, "Database not found.")
 				return
 			}
 			conn, err := s.store.GetDBConnection(r.Context(), id)
 			if errors.Is(err, store.ErrNotFound) {
-				s.renderError(w, r, http.StatusNotFound, "Database tidak ditemukan.")
+				s.renderError(w, r, http.StatusNotFound, "Database not found.")
 				return
 			}
 			if err != nil {
 				s.logger.Error("load database", "error", err)
-				s.renderError(w, r, http.StatusInternalServerError, "Gagal memuat database.")
+				s.renderError(w, r, http.StatusInternalServerError, "Could not load the database.")
 				return
 			}
 			level, err := s.policy.Level(r.Context(), *user, id)
 			if err != nil {
 				s.logger.Error("check access", "error", err)
-				s.renderError(w, r, http.StatusInternalServerError, "Gagal memeriksa hak akses.")
+				s.renderError(w, r, http.StatusInternalServerError, "Could not check access rights.")
 				return
 			}
 			if level < required {
-				s.renderError(w, r, http.StatusForbidden, "Anda tidak memiliki hak akses yang cukup pada database ini.")
+				s.renderError(w, r, http.StatusForbidden, "You do not have sufficient access to this database.")
 				return
 			}
 			ctx := context.WithValue(r.Context(), dbKey, &conn)
@@ -334,10 +339,28 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 			data.CSRF = sess.CSRFToken
 		}
 	}
-	data.Flash = s.readFlash(w, r)
+	if data.Flash == nil {
+		data.Flash = s.readFlash(w, r)
+	}
 
 	funcs := template.FuncMap{
-		"levelLabel": func(l domain.AccessLevel) string { return l.Label() },
+		"levelLabel":      func(l domain.AccessLevel) string { return l.Label() },
+		"statusLabel":     statusLabel,
+		"relkindLabel":    relkindLabel,
+		"constraintLabel": constraintLabel,
+		"formatTime":      formatTime,
+		"formatDuration":  formatDuration,
+		"formatInt":       formatInt,
+		"isoTime":         formatISOTime,
+		"truncate":        truncate,
+		"pageLinks":       pageLinks,
+		"dict":            dict,
+		"join":            strings.Join,
+		"count":           countLabel,
+		"lines":           func(s string) []string { return strings.Split(strings.TrimRight(s, "\n"), "\n") },
+		"list":            func(v ...string) []string { return v },
+		"add":             func(a, b int) int { return a + b },
+		"sub":             func(a, b int) int { return a - b },
 		"dash": func(v string) string {
 			if strings.TrimSpace(v) == "" {
 				return "—"
@@ -345,7 +368,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 			return v
 		},
 	}
-	tmpl, err := template.New("layout").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/pages/"+page)
+	tmpl, err := template.New("layout").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partials/*.html", "templates/pages/"+page)
 	if err != nil {
 		s.logger.Error("parse template", "page", page, "error", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
@@ -360,19 +383,21 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 }
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, message string) {
-	s.render(w, r, status, "error.html", pageData{Title: "Error", Message: message})
+	s.render(w, r, status, "system/error.html", pageData{Title: "Error", Message: message})
 }
 
 type pageData struct {
-	Title   string
-	Nav     string
-	User    *domain.User
-	CSRF    string
-	Flash   *flashMessage
-	Message string
-	Data    any
-	DB      *domain.DBConnection
-	Level   domain.AccessLevel
+	Title    string
+	Nav      string
+	User     *domain.User
+	CSRF     string
+	Flash    *flashMessage
+	Message  string
+	Data     any
+	DB       *domain.DBConnection
+	Level    domain.AccessLevel
+	Preview  bool
+	NoHeader bool
 }
 
 type flashMessage struct {

@@ -26,24 +26,25 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := s.loginCSRFToken(w, r)
 	if err != nil {
-		s.renderError(w, r, http.StatusInternalServerError, "Gagal menyiapkan form login.")
+		s.renderError(w, r, http.StatusInternalServerError, "Could not prepare the sign-in form.")
 		return
 	}
-	s.render(w, r, http.StatusOK, "login.html", pageData{
-		Title: "Masuk",
-		CSRF:  token,
-		Data:  map[string]string{"Next": safeNext(r.URL.Query().Get("next"))},
+	s.render(w, r, http.StatusOK, "auth/login.html", pageData{
+		Title:    "Sign in",
+		CSRF:     token,
+		Data:     map[string]string{"Next": safeNext(r.URL.Query().Get("next"))},
+		NoHeader: true,
 	})
 }
 
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderError(w, r, http.StatusBadRequest, "Form login tidak valid.")
+		s.renderError(w, r, http.StatusBadRequest, "Invalid sign-in form.")
 		return
 	}
 	cookie, err := r.Cookie("csrf_login")
 	if err != nil || !constantTimeEqual(r.FormValue("csrf_token"), cookie.Value) {
-		s.renderError(w, r, http.StatusForbidden, "Token CSRF login tidak valid. Muat ulang halaman.")
+		s.renderError(w, r, http.StatusForbidden, "Invalid sign-in CSRF token. Reload the page.")
 		return
 	}
 
@@ -51,7 +52,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	key := clientIP(r) + "|" + strings.ToLower(username)
 	if !s.limiter.allowed(key) {
-		s.setFlash(w, "error", "Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.")
+		s.setFlash(w, "error", "Too many sign-in attempts. Try again in a few minutes.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -60,19 +61,19 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, store.ErrNotFound) {
 		auth.PerformDummyVerify(password)
 		s.limiter.fail(key)
-		s.setFlash(w, "error", "Username atau password salah.")
+		s.setFlash(w, "error", "Incorrect username or password.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	if err != nil {
 		s.logger.Error("login lookup", "error", err)
-		s.renderError(w, r, http.StatusInternalServerError, "Gagal memproses login.")
+		s.renderError(w, r, http.StatusInternalServerError, "Could not process sign-in.")
 		return
 	}
 	ok, err := auth.VerifyPassword(user.PasswordHash, password)
 	if err != nil || !ok {
 		s.limiter.fail(key)
-		s.setFlash(w, "error", "Username atau password salah.")
+		s.setFlash(w, "error", "Incorrect username or password.")
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -85,12 +86,12 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	raw, _, err := s.sessions.Create(r.Context(), user.ID)
 	if err != nil {
 		s.logger.Error("create session", "error", err)
-		s.renderError(w, r, http.StatusInternalServerError, "Gagal membuat sesi.")
+		s.renderError(w, r, http.StatusInternalServerError, "Could not create a session.")
 		return
 	}
 	s.setSessionCookie(w, raw)
 	http.SetCookie(w, &http.Cookie{Name: "csrf_login", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.cfg.CookieSecure})
-	s.setFlash(w, "success", "Selamat datang, "+user.Username+".")
+	s.setFlash(w, "success", "Welcome, "+user.Username+".")
 	http.Redirect(w, r, safeNext(r.FormValue("next")), http.StatusSeeOther)
 }
 
@@ -101,7 +102,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.clearSessionCookie(w)
-	s.setFlash(w, "success", "Anda sudah keluar.")
+	s.setFlash(w, "success", "You have signed out.")
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -110,11 +111,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	dbs, err := s.store.ListAccessibleDBs(r.Context(), user.ID)
 	if err != nil {
 		s.logger.Error("list accessible databases", "error", err)
-		s.renderError(w, r, http.StatusInternalServerError, "Gagal memuat daftar database.")
+		s.renderError(w, r, http.StatusInternalServerError, "Could not load the database list.")
 		return
 	}
-	s.render(w, r, http.StatusOK, "dashboard.html", pageData{
-		Title: "Database",
+	s.render(w, r, http.StatusOK, "dashboard/dashboard.html", pageData{
+		Title: "Databases",
 		Nav:   "databases",
 		Data:  dashboardData{Databases: dbs, IsAdmin: user.IsPlatformAdmin},
 	})

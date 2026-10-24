@@ -1,0 +1,37 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeader" .}}
+{{$root := .}}
+{{with .Data}}
+{{$base := printf "/databases/%s/migrations/drafts/%s" $root.DB.ID .Draft.ID}}
+{{/* Editor draft */}}
+<section class="stack" aria-labelledby="editor-title">
+    <div>
+      {{/* Judul dan info revisi */}}
+      <h2 id="editor-title">{{or .Draft.Title "Untitled draft"}}</h2>
+      <p class="muted text-sm">Revision {{.Draft.Revision}} · updated <time datetime="{{isoTime .Draft.UpdatedAt}}">{{formatTime .Draft.UpdatedAt}}</time>{{with .Draft.UpdatedByName}} by {{.}}{{end}}</p>
+    </div>
+
+    {{/* Error eksekusi */}}
+    {{with .Failure}}
+    <div class="alert alert--error" role="alert">
+      <div>
+        <p class="alert__title">Execution failed, recorded as v{{.Version}}</p>
+        <p class="mono">{{.Error}}</p>
+        <p class="text-sm">The draft is kept. <a href="/databases/{{$root.DB.ID}}/migrations?migration={{.ID}}">View in history</a></p>
+      </div>
+    </div>
+    {{end}}
+    {{/* Error validasi */}}
+    {{template "formError" .Form}}
+
+    {{/* Form draft */}}
+    <form class="form" method="post" action="{{$base}}">
+      <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+      <input type="hidden" name="token" value="{{.Draft.Revision}}">
+      {{template "draftFields" dict "title" .Draft.Title "sql" .SQL "errors" .Form.Errors "errorLine" .SQLErrorLine}}
+      {{template "draftActions" dict "base" $base "db" $root.DB.Name "delete" true "explain" .Explain}}
+    </form>
+</section>
+{{end}}
+{{end}}

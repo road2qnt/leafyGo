@@ -1,0 +1,32 @@
+{{define "content"}}
+{{$root := .}}
+{{with .Data}}
+{{/* Breadcrumb */}}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="/admin/groups">Groups</a></li>
+    <li><span aria-current="page">New group</span></li>
+  </ol>
+</nav>
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    <h1>Create group</h1>
+  </div>
+</div>
+{{/* Form grup baru */}}
+<section class="card" aria-labelledby="group-form-title">
+  <h2 id="group-form-title" class="section-title">Details</h2>
+  {{template "formError" .Form}}
+  <form class="form" method="post" action="/admin/groups" novalidate>
+    <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+    {{template "groupFields" dict "prefix" "group" "values" .Form.Values "errors" .Form.Errors}}
+    <p class="field__hint">Members and database access are added after the group is created.</p>
+    <div class="form__actions">
+      <button class="btn btn--primary" type="submit">Create group</button>
+      <a class="btn btn--ghost" href="/admin/groups">Cancel</a>
+    </div>
+  </form>
+</section>
+{{end}}
+{{end}}
