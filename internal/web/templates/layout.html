@@ -1,0 +1,30 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · leafyGo</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">leafyGo</a>
+  <nav>
+    {{if .User}}
+      <span class="user">{{.User.Username}}{{if .User.IsPlatformAdmin}} · admin{{end}}</span>
+      <form class="inline" method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button type="submit">Keluar</button>
+      </form>
+    {{else}}
+      <a href="/login">Masuk</a>
+    {{end}}
+  </nav>
+</header>
+{{if .Flash}}<p class="flash flash--{{.Flash.Kind}}">{{.Flash.Message}}</p>{{end}}
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

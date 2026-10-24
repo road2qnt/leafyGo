@@ -1,0 +1,10 @@
+{{define "content"}}
+<h1>Masuk</h1>
+<form method="post" action="/login">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  {{with .Data}}<input type="hidden" name="next" value="{{index . "Next"}}">{{end}}
+  <label>Username <input name="username" autocomplete="username" required></label>
+  <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+  <button type="submit">Masuk</button>
+</form>
+{{end}}
