@@ -8,11 +8,6 @@ import (
 	"leafygo/internal/store"
 )
 
-// EnsureAdmin creates the bootstrap platform admin when it does not exist and
-// promotes it if it was created earlier without the flag.
-//
-// Slice ownership (leafyGo): Ega. Demo seeding (siti/budi/groups/connection)
-// belongs to Putra and lives in DemoSeed (to be added by Putra).
 func EnsureAdmin(ctx context.Context, st *store.Store, username, password string) error {
 	if username == "" || password == "" {
 		return nil

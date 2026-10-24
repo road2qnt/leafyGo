@@ -11,11 +11,6 @@ import (
 	"time"
 )
 
-// Config holds all runtime configuration. Values are read from the
-// environment so the same binary works locally, in Docker, and in production.
-//
-// Slice ownership (leafyGo): Ega owns this file. Jibril and Putra read it
-// but do not change defaults without asking Ega.
 type Config struct {
 	Addr            string
 	DatabaseURL     string
@@ -106,9 +101,6 @@ func boolEnv(key string, fallback bool) (bool, error) {
 	return v, nil
 }
 
-// decodeKey accepts a base64 (standard or raw) or hex encoded 32-byte key.
-// There is deliberately no hard-coded fallback so a deployment cannot
-// accidentally ship a known key.
 func decodeKey(raw string) ([]byte, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

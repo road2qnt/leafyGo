@@ -1,9 +1,4 @@
--- 001: fondasi backend/auth/RBAC milik Ega.
--- Berisi semua tabel yang dibutuhkan slice auth + RBAC:
--- users, groups, group_members, sessions, db_connections, db_access.
---
--- SEAM (Jibril): JANGAN edit file ini setelah di-apply. Tambahkan file baru
--- 002_migration_history.sql untuk tabel migration_history milik slice migration.
+-- Jibril: tambah file 002, jangan edit file ini.
 
 create table users (
     id uuid primary key,

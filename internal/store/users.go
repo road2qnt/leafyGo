@@ -55,7 +55,6 @@ func (s *Store) scanUser(row pgx.Row) (domain.User, error) {
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
-	// Deliberately do not select password_hash: list views have no use for it.
 	rows, err := s.pool.Query(ctx, `
 		select id, username, is_platform_admin, created_at
 		from users order by lower(username)`)

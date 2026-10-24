@@ -29,9 +29,6 @@ type SessionStore interface {
 	RevokeSession(ctx context.Context, idHash []byte) error
 }
 
-// Manager owns session lifetime policy: idle timeout, absolute expiration,
-// periodic rotation, and the grace window in which a just-rotated identifier
-// still works.
 type Manager struct {
 	store    SessionStore
 	idle     time.Duration
@@ -72,9 +69,6 @@ func (m *Manager) Create(ctx context.Context, userID uuid.UUID) (string, domain.
 	return raw, sess, nil
 }
 
-// Resolve validates a raw session identifier. If rotation is due it creates a
-// replacement and returns its raw value so the caller can refresh the cookie.
-// An empty newRaw means the existing cookie stays as-is.
 func (m *Manager) Resolve(ctx context.Context, raw string) (domain.Session, string, error) {
 	if raw == "" {
 		return domain.Session{}, "", ErrSessionInvalid

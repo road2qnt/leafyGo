@@ -12,8 +12,6 @@ import (
 	"leafygo/internal/store"
 )
 
-// fakeStore is an in-memory SessionStore so session policy can be tested
-// without a database.
 type fakeStore struct {
 	mu       sync.Mutex
 	sessions map[string]domain.Session
@@ -116,12 +114,10 @@ func TestSessionResolveAndRotateWithGrace(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Before rotation interval: resolves without a new identifier.
 	if _, newRaw, err := m.Resolve(ctx, raw); err != nil || newRaw != "" {
 		t.Fatalf("Resolve = %q, %v; want no rotation", newRaw, err)
 	}
 
-	// After rotation interval: resolves with a replacement identifier.
 	now = now.Add(16 * time.Minute)
 	m.now = func() time.Time { return now }
 	_, newRaw, err := m.Resolve(ctx, raw)
@@ -129,18 +125,15 @@ func TestSessionResolveAndRotateWithGrace(t *testing.T) {
 		t.Fatalf("Resolve after rotate interval = %q, %v; want new identifier", newRaw, err)
 	}
 
-	// Old identifier still works inside the grace window (follows rotated_to).
 	if _, _, err := m.Resolve(ctx, raw); err != nil {
 		t.Fatalf("old identifier inside grace: %v", err)
 	}
 
-	// Old identifier dies after the grace window.
 	now = now.Add(11 * time.Second)
 	m.now = func() time.Time { return now }
 	if _, _, err := m.Resolve(ctx, raw); err == nil {
 		t.Fatal("expected old identifier to be invalid after grace")
 	}
-	// The replacement still works.
 	if _, _, err := m.Resolve(ctx, newRaw); err != nil {
 		t.Fatalf("replacement identifier: %v", err)
 	}
@@ -169,9 +162,6 @@ func TestSessionIdleAndAbsoluteExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	// Touch the session every 20 minutes (inside the idle window) so idle
-	// never fires. Rotations happen along the way (rotate = 1h) but must not
-	// extend the absolute deadline, which stays anchored at creation + 8h.
 	for i := 0; i < 23; i++ {
 		now2 = now2.Add(20 * time.Minute)
 		_, newRaw, err := abs.Resolve(ctx, raw2)
@@ -182,8 +172,6 @@ func TestSessionIdleAndAbsoluteExpiry(t *testing.T) {
 			raw2 = newRaw
 		}
 	}
-	// 23 x 20min = 7h40m: still alive. One more step crosses the 8h
-	// absolute deadline despite the touches.
 	now2 = now2.Add(20 * time.Minute)
 	if _, _, err := abs.Resolve(ctx, raw2); err == nil {
 		t.Fatal("expected absolute expiry")

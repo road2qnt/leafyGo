@@ -1,5 +1,3 @@
-// Package domain defines the shared model types. The types are plain data:
-// all policy lives in internal/access and internal/auth.
 package domain
 
 import (
@@ -82,8 +80,6 @@ func (l AccessLevel) Label() string {
 func (l AccessLevel) CanView() bool { return l >= LevelView }
 func (l AccessLevel) CanEdit() bool { return l >= LevelEdit }
 
-// AccessibleDB is a connection joined with the effective level the current
-// user has on it.
 type AccessibleDB struct {
 	DBConnection
 	Level AccessLevel

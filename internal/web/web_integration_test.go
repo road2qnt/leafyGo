@@ -67,7 +67,6 @@ func login(t *testing.T, srv *Server, username, password string) (sid, csrf stri
 	t.Helper()
 	form := url.Values{"username": {username}, "password": {password}}
 
-	// First fetch the login page to obtain the double-submit CSRF cookie.
 	get := httptest.NewRequest(http.MethodGet, "/login", nil)
 	getRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(getRec, get)
@@ -125,7 +124,6 @@ func TestLoginFlowAndCookieFlags(t *testing.T) {
 
 	sid, _ := login(t, srv, "ega", "password123")
 	found := false
-	// Re-run a raw login to inspect cookie attributes.
 	form := url.Values{"username": {"ega"}, "password": {"password123"}}
 	get := httptest.NewRequest(http.MethodGet, "/login", nil)
 	getRec := httptest.NewRecorder()
@@ -157,7 +155,6 @@ func TestLoginFlowAndCookieFlags(t *testing.T) {
 		t.Fatal("no sid cookie")
 	}
 
-	// Authenticated dashboard renders.
 	dash := httptest.NewRequest(http.MethodGet, "/", nil)
 	dash.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	dashRec := httptest.NewRecorder()
@@ -192,7 +189,6 @@ func TestRBACViewOnlyCannotReachEditRoute(t *testing.T) {
 
 	sid, csrf := login(t, srv, "budi", "password123")
 
-	// View-level seam route is reachable (stub 501 = passed RBAC, not implemented).
 	viewReq := httptest.NewRequest(http.MethodGet, "/databases/"+conn.ID.String()+"/schema", nil)
 	viewReq.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	viewRec := httptest.NewRecorder()
@@ -201,7 +197,6 @@ func TestRBACViewOnlyCannotReachEditRoute(t *testing.T) {
 		t.Fatalf("view route status = %d; want 501 (passed RBAC)", viewRec.Code)
 	}
 
-	// Edit-level seam route must be rejected with 403 by requireDBLevel.
 	rec := postForm(t, srv, "/databases/"+conn.ID.String()+"/migrations", sid, csrf, nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("edit route status = %d; want 403", rec.Code)

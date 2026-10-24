@@ -40,12 +40,6 @@ func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// Migrate applies embedded platform migrations in version order. It uses a
-// dedicated connection in simple protocol mode because each migration file
-// can contain multiple statements.
-//
-// SEAM (Jibril): to add the migration_history table, add a new file
-// 002_migration_history.sql. Never edit 001 after it has been applied.
 func Migrate(ctx context.Context, databaseURL string) error {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {

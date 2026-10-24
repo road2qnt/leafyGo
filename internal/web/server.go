@@ -28,12 +28,6 @@ import (
 //go:embed templates/*.html templates/pages/*.html static/*
 var assets embed.FS
 
-// Server wires HTTP routes to the auth/RBAC slice.
-//
-// Slice ownership (leafyGo): Ega owns everything in this package up to the
-// seam markers below. Jibril implements the bodies behind the stub handlers
-// (admin CRUD, viewer, migration); Putra owns templates/static styling and
-// demo seed content.
 type Server struct {
 	cfg      config.Config
 	store    *store.Store
@@ -89,11 +83,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/logout", s.handleLogout)
 		r.Get("/", s.handleDashboard)
 
-		// === SEAM: Jibril (admin) ===
-		// Routes below exist so teammates can link to them today; bodies
-		// return 501 until Jibril implements them. Do not remove the
-		// requirePlatformAdmin gate when filling them in.
 		r.Route("/admin", func(r chi.Router) {
+			// Jibril: admin
 			r.Use(s.requirePlatformAdmin)
 			r.Get("/users", s.stubNotImplemented("admin users — Jibril"))
 			r.Post("/users", s.stubNotImplemented("admin users — Jibril"))
@@ -103,11 +94,8 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/databases", s.stubNotImplemented("admin databases — Jibril"))
 		})
 
-		// === SEAM: Jibril (viewer + migration) ===
-		// :id routes resolve the connection + effective level via
-		// requireDBLevel, so Jibril's handlers only see authorized requests.
-		// Bodies return 501 until Jibril implements them.
 		r.Route("/databases/{id}", func(r chi.Router) {
+			// Jibril: viewer + migration
 			r.With(s.requireDBLevel(domain.LevelView)).Get("/", s.stubNotImplemented("viewer overview — Jibril"))
 			r.With(s.requireDBLevel(domain.LevelView)).Get("/schema", s.stubNotImplemented("viewer schema — Jibril"))
 			r.With(s.requireDBLevel(domain.LevelView)).Get("/data", s.stubNotImplemented("viewer data — Jibril"))
@@ -128,7 +116,6 @@ func (s *Server) Handler() http.Handler {
 	return r
 }
 
-// stubNotImplemented keeps seam routes linkable before Jibril fills them in.
 func (s *Server) stubNotImplemented(what string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, http.StatusNotImplemented, "stub.html", pageData{
@@ -234,10 +221,6 @@ func (s *Server) requirePlatformAdmin(next http.Handler) http.Handler {
 	})
 }
 
-// requireDBLevel loads the connection by :id, resolves the caller's effective
-// level through the access policy, and rejects the request when the level is
-// below required. Handlers behind this middleware (Jibril's slice) can trust
-// currentDB/currentLevel without re-checking.
 func (s *Server) requireDBLevel(required domain.AccessLevel) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +305,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		// Never log cookies, tokens, or passwords: only method/path/status.
+		// Jangan log cookie/token/password.
 		s.logger.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,

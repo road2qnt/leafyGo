@@ -52,8 +52,6 @@ func (s *Store) TouchSession(ctx context.Context, idHash []byte, lastSeen, idleE
 	return nil
 }
 
-// RotateSession atomically links the old identifier to the new one and inserts
-// the replacement. The old row stays valid until graceExpiresAt.
 func (s *Store) RotateSession(ctx context.Context, oldHash []byte, next domain.Session, graceExpiresAt time.Time) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

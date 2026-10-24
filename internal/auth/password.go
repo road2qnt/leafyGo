@@ -12,8 +12,6 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// Argon2id parameters. They are stored in each hash so they can be raised
-// later without invalidating existing passwords.
 const (
 	argonMemory      = 64 * 1024 // 64 MiB
 	argonIterations  = 3
@@ -42,9 +40,7 @@ var (
 	dummyHash     string
 )
 
-// PerformDummyVerify burns the same Argon2 work as a real verification. It is
-// used when a username does not exist so response timing does not reveal which
-// usernames are registered.
+// Samarkan timing agar username tak bisa ditebak.
 func PerformDummyVerify(password string) {
 	dummyHashOnce.Do(func() {
 		dummyHash, _ = HashPassword("dummy-password-that-is-never-valid")

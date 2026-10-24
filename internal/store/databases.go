@@ -100,9 +100,6 @@ func (s *Store) ListDBConnections(ctx context.Context) ([]domain.DBConnection, e
 	return out, rows.Err()
 }
 
-// ListAccessibleDBs returns only the connections the user may open, each
-// joined with the user's effective level (highest across all their groups).
-// This is what the dashboard renders: the RBAC filter lives here, not in UI.
 func (s *Store) ListAccessibleDBs(ctx context.Context, userID uuid.UUID) ([]domain.AccessibleDB, error) {
 	rows, err := s.pool.Query(ctx, `
 		select c.id, c.name, c.host, c.port, c.dbname, c.username, c.password_enc, c.sslmode,
@@ -132,10 +129,7 @@ func (s *Store) ListAccessibleDBs(ctx context.Context, userID uuid.UUID) ([]doma
 	return out, rows.Err()
 }
 
-// EffectiveLevel returns the highest level granted to the user on the given
-// database through any of their groups. No group = LevelNone. The platform
-// admin flag is intentionally ignored here: admins get DB access only by
-// being group members, like everyone else.
+// Level tertinggi antar group menang; admin flag tidak dihitung.
 func (s *Store) EffectiveLevel(ctx context.Context, userID, dbID uuid.UUID) (domain.AccessLevel, error) {
 	var level int
 	err := s.pool.QueryRow(ctx, `

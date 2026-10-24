@@ -9,11 +9,6 @@ import (
 	"io"
 )
 
-// Box encrypts short secrets (target database passwords) with AES-256-GCM.
-// The nonce is prepended to the ciphertext so each value is self-contained.
-//
-// Slice ownership (leafyGo): Ega. Jibril uses Box only through the seam
-// documented in SEAM.md (decrypt when opening a target connection).
 type Box struct {
 	aead cipher.AEAD
 }

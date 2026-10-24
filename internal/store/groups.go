@@ -79,8 +79,6 @@ func (s *Store) ListGroupMembers(ctx context.Context, groupID uuid.UUID) ([]doma
 	return users, rows.Err()
 }
 
-// SetGroupAccess grants a group a level on a database. LevelNone removes the
-// grant. Admin CRUD pages (Jibril) call this; the access policy only reads.
 func (s *Store) SetGroupAccess(ctx context.Context, groupID, dbID uuid.UUID, level domain.AccessLevel) error {
 	if level == domain.LevelNone {
 		return s.RemoveGroupAccess(ctx, groupID, dbID)

@@ -56,9 +56,7 @@ func run() error {
 		return err
 	}
 
-	// NOTE (seam): demo seed (siti/budi/groups/connection) is Putra's slice
-	// and is intentionally absent here.
-
+	// Putra: demo seed.
 	go cleanupSessions(ctx, st, logger)
 
 	handler := web.New(cfg, st, sessionManager, policy, logger).Handler()

@@ -16,8 +16,6 @@ import (
 func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("sid"); err == nil && cookie.Value != "" {
 		if _, newRaw, err := s.sessions.Resolve(r.Context(), cookie.Value); err == nil {
-			// Resolve may rotate the identifier; always send the replacement
-			// back before redirecting, otherwise the old cookie dies after grace.
 			if newRaw != "" {
 				s.setSessionCookie(w, newRaw)
 			}
@@ -80,9 +78,8 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	s.limiter.reset(key)
 
-	// A fresh identifier is issued on every login. Any previous browser
-	// session is revoked so a fixated identifier cannot survive authentication.
 	if old, err := r.Cookie("sid"); err == nil && old.Value != "" {
+		// Cabut session lama anti fixation.
 		_ = s.sessions.Revoke(r.Context(), old.Value)
 	}
 	raw, _, err := s.sessions.Create(r.Context(), user.ID)

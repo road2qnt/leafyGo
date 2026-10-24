@@ -12,9 +12,6 @@ type LevelStore interface {
 	EffectiveLevel(ctx context.Context, userID, dbID uuid.UUID) (domain.AccessLevel, error)
 }
 
-// Policy resolves a user's effective access on a database. Access is granted
-// only through groups; when several groups grant access, the most permissive
-// level wins. Platform admin is deliberately not a database access level.
 type Policy struct {
 	store LevelStore
 }

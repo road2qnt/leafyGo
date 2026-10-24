@@ -87,7 +87,6 @@ func TestEffectiveLevelHighestWins(t *testing.T) {
 		t.Fatalf("level = %v; want edit (highest wins)", lvl)
 	}
 
-	// Platform admin flag alone grants nothing: admin is in no group.
 	if lvl, _ := st.EffectiveLevel(ctx, admin.ID, conn.ID); lvl != domain.LevelNone {
 		t.Fatalf("admin level = %v; want none", lvl)
 	}
