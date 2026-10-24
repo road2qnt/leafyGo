@@ -60,9 +60,68 @@ func (s *Store) CreateDBConnection(ctx context.Context, c domain.DBConnection) (
 		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)`,
 		c.ID, c.Name, c.Host, c.Port, c.DBName, c.Username, c.PasswordEnc, c.SSLMode, createdBy, c.CreatedAt)
 	if err != nil {
-		return domain.DBConnection{}, fmt.Errorf("create db connection: %w", err)
+		return domain.DBConnection{}, fmt.Errorf("create db connection: %w", mapWriteError(err))
 	}
 	return c, nil
+}
+
+func (s *Store) UpdateDBConnection(ctx context.Context, c domain.DBConnection) (domain.DBConnection, error) {
+	var r dbConnectionRow
+	err := s.pool.QueryRow(ctx, `
+		update db_connections
+		set name=$2, host=$3, port=$4, dbname=$5, username=$6, password_enc=$7, sslmode=$8,
+		    updated_at=clock_timestamp()
+		where id=$1
+		returning id, name, host, port, dbname, username, password_enc, sslmode,
+		          created_by, created_at, updated_at`,
+		c.ID, c.Name, c.Host, c.Port, c.DBName, c.Username, c.PasswordEnc, c.SSLMode).
+		Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode,
+			&r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.DBConnection{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.DBConnection{}, fmt.Errorf("update db connection: %w", mapWriteError(err))
+	}
+	return r.toDomain(), nil
+}
+
+func (s *Store) DeleteDBConnection(ctx context.Context, id uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete db begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Row lock makes delete vs history-insert deterministic: the insert holds
+	// FOR KEY SHARE on this row, so either delete waits and then sees running,
+	// or delete wins and the insert fails its foreign key.
+	var locked uuid.UUID
+	err = tx.QueryRow(ctx, `select id from db_connections where id=$1 for update`, id).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock db connection: %w", err)
+	}
+
+	var running bool
+	if err := tx.QueryRow(ctx, `
+		select exists(select 1 from migration_history where db_id=$1 and status='running')`, id).
+		Scan(&running); err != nil {
+		return fmt.Errorf("check running migration: %w", err)
+	}
+	if running {
+		return ErrRunningMigration
+	}
+
+	if _, err := tx.Exec(ctx, `delete from db_connections where id=$1`, id); err != nil {
+		return fmt.Errorf("delete db connection: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete db commit: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) GetDBConnection(ctx context.Context, id uuid.UUID) (domain.DBConnection, error) {

@@ -101,13 +101,13 @@ func (s *Server) Handler() http.Handler {
 
 		r.Route("/databases/{id}", func(r chi.Router) {
 			// Jibril: viewer + migration
-			r.With(s.requireDBLevel(domain.LevelView)).Get("/", s.stubNotImplemented("viewer overview — Jibril"))
-			r.With(s.requireDBLevel(domain.LevelView)).Get("/schema", s.stubNotImplemented("viewer schema — Jibril"))
-			r.With(s.requireDBLevel(domain.LevelView)).Get("/data", s.stubNotImplemented("viewer data — Jibril"))
-			r.With(s.requireDBLevel(domain.LevelView)).Get("/migrations", s.stubNotImplemented("migration history — Jibril"))
-			r.With(s.requireDBLevel(domain.LevelEdit)).Get("/migrations/new", s.stubNotImplemented("migration editor — Jibril"))
-			r.With(s.requireDBLevel(domain.LevelEdit)).Post("/migrations", s.stubNotImplemented("migration execute — Jibril"))
-			r.With(s.requireDBLevel(domain.LevelEdit)).Post("/migrations/explain", s.stubNotImplemented("migration explain — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.stubNotImplemented("viewer overview — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.stubNotImplemented("viewer schema — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.stubNotImplemented("viewer data — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.stubNotImplemented("migration history — Jibril"))
+			r.With(s.requireDBAction(access.ActionManageDrafts)).Get("/migrations/new", s.stubNotImplemented("migration editor — Jibril"))
+			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations", s.stubNotImplemented("migration execute — Jibril"))
+			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/explain", s.stubNotImplemented("migration explain — Jibril"))
 		})
 	})
 
@@ -219,6 +219,7 @@ func (s *Server) requirePlatformAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := currentUser(r)
 		if user == nil || !user.IsPlatformAdmin {
+			s.auditDenied(r, "admin", r.URL.Path)
 			s.renderError(w, r, http.StatusForbidden, "This page is for Platform Admins only.")
 			return
 		}
@@ -226,7 +227,7 @@ func (s *Server) requirePlatformAdmin(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireDBLevel(required domain.AccessLevel) func(http.Handler) http.Handler {
+func (s *Server) requireDBAction(action access.Action) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := currentUser(r)
@@ -255,8 +256,13 @@ func (s *Server) requireDBLevel(required domain.AccessLevel) func(http.Handler) 
 				s.renderError(w, r, http.StatusInternalServerError, "Could not check access rights.")
 				return
 			}
-			if level < required {
-				s.renderError(w, r, http.StatusForbidden, "You do not have sufficient access to this database.")
+			if !access.Can(level, action) {
+				s.auditDenied(r, string(action), id.String())
+				if user.IsPlatformAdmin {
+					s.renderError(w, r, http.StatusForbidden, "Platform Admin accounts cannot access database tools.")
+				} else {
+					s.renderError(w, r, http.StatusForbidden, "You do not have sufficient access to this database.")
+				}
 				return
 			}
 			ctx := context.WithValue(r.Context(), dbKey, &conn)
@@ -264,6 +270,19 @@ func (s *Server) requireDBLevel(required domain.AccessLevel) func(http.Handler) 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func (s *Server) auditDenied(r *http.Request, action, target string) {
+	actorID := ""
+	if user := currentUser(r); user != nil {
+		actorID = user.ID.String()
+	}
+	s.logger.Warn("access denied",
+		"actor_id", actorID,
+		"target_id", target,
+		"action", action,
+		"result", "forbidden",
+	)
 }
 
 func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {

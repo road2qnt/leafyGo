@@ -27,7 +27,14 @@ type Config struct {
 	AdminUsername string
 	AdminPassword string
 
-	UIPreview bool
+	UIPreview                    bool
+	TargetConnectTimeout         time.Duration
+	ViewerStatementTimeout       time.Duration
+	MigrationAdvisoryLockTimeout time.Duration
+	MigrationTimeout             time.Duration
+	MaxMigrationBytes            int64
+	ViewerPageSize               int
+	ViewerMaxPageSize            int
 }
 
 func Load() (Config, error) {
@@ -59,6 +66,34 @@ func Load() (Config, error) {
 	if cfg.CookieSecure, err = boolEnv("COOKIE_SECURE", cfg.AppEnv == "production"); err != nil {
 		return Config{}, err
 	}
+	if cfg.TargetConnectTimeout, err = durationEnv("TARGET_CONNECT_TIMEOUT", 5*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.ViewerStatementTimeout, err = durationEnv("VIEWER_STATEMENT_TIMEOUT", 5*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.MigrationAdvisoryLockTimeout, err = durationEnv("MIGRATION_ADVISORY_LOCK_TIMEOUT", 10*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.MigrationTimeout, err = durationEnv("MIGRATION_TIMEOUT", 30*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxMigrationBytes, err = positiveInt64Env("MAX_MIGRATION_BYTES", 1048576); err != nil {
+		return Config{}, err
+	}
+	viewerPageSize, err := positiveInt64Env("VIEWER_PAGE_SIZE", 50)
+	if err != nil {
+		return Config{}, err
+	}
+	viewerMaxPageSize, err := positiveInt64Env("VIEWER_MAX_PAGE_SIZE", 100)
+	if err != nil {
+		return Config{}, err
+	}
+	if viewerMaxPageSize < viewerPageSize {
+		return Config{}, errors.New("VIEWER_MAX_PAGE_SIZE must be greater than or equal to VIEWER_PAGE_SIZE")
+	}
+	cfg.ViewerPageSize = int(viewerPageSize)
+	cfg.ViewerMaxPageSize = int(viewerMaxPageSize)
 
 	if cfg.UIPreview, err = boolEnv("UI_PREVIEW", false); err != nil {
 		return Config{}, err
@@ -106,6 +141,21 @@ func boolEnv(key string, fallback bool) (bool, error) {
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
 		return false, fmt.Errorf("%s must be true or false: %w", key, err)
+	}
+	return v, nil
+}
+
+func positiveInt64Env(key string, fallback int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	if v <= 0 {
+		return 0, fmt.Errorf("%s must be positive", key)
 	}
 	return v, nil
 }
