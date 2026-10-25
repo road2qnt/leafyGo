@@ -20,7 +20,16 @@ var validSSLModes = map[string]struct{}{
 	"verify-full": {},
 }
 
+// BuildDSN constructs a PostgreSQL connection string for the target connection.
+func BuildDSN(db domain.DBConnection, password string) (string, error) {
+	return buildDSNImpl(db, password)
+}
+
 func buildDSN(db domain.DBConnection, password string) (string, error) {
+	return buildDSNImpl(db, password)
+}
+
+func buildDSNImpl(db domain.DBConnection, password string) (string, error) {
 	sslMode := strings.TrimSpace(db.SSLMode)
 	if _, ok := validSSLModes[sslMode]; !ok {
 		return "", fmt.Errorf("invalid sslmode %q: must be one of disable, allow, prefer, require, verify-ca, verify-full", db.SSLMode)

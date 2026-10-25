@@ -23,6 +23,7 @@ import (
 	"leafygo/internal/config"
 	"leafygo/internal/domain"
 	"leafygo/internal/migration"
+	"leafygo/internal/queryconsole"
 	"leafygo/internal/secret"
 	"leafygo/internal/store"
 	"leafygo/internal/target"
@@ -41,6 +42,7 @@ type Server struct {
 	box        *secret.Box
 	targets    *target.Manager
 	migrations *migration.Service
+	queries    *queryconsole.Service
 }
 
 // cfg.EncryptionKey sudah divalidasi config.Load.
@@ -62,6 +64,16 @@ func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *acc
 		ConnectTimeout: cfg.TargetConnectTimeout,
 		ViewerTimeout:  cfg.ViewerStatementTimeout,
 	})
+	queryRunner := queryconsole.NewRunner(box, cfg.TargetConnectTimeout, "leafygo")
+	queries := queryconsole.NewService(queryRunner, logger, queryconsole.ServiceOptions{
+		MaxConcurrent:       cfg.QueryMaxConcurrent,
+		AdvisoryLockTimeout: cfg.MigrationAdvisoryLockTimeout,
+		QueryTimeout:        cfg.QueryTimeout,
+		MaxQueryBytes:       cfg.MaxQueryBytes,
+		MaxRows:             cfg.QueryMaxRows,
+		MaxCellBytes:        cfg.QueryMaxCellBytes,
+		MaxResultBytes:      cfg.QueryMaxResultBytes,
+	})
 	return &Server{
 		cfg:      cfg,
 		store:    st,
@@ -76,6 +88,7 @@ func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *acc
 			MigrationTimeout:    cfg.MigrationTimeout,
 			MaxMigrationBytes:   int(cfg.MaxMigrationBytes),
 		}),
+		queries: queries,
 	}
 }
 
@@ -154,6 +167,9 @@ func (s *Server) Handler() http.Handler {
 			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.handleOverview)
 			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.handleSchema)
 			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
+			r.With(s.requireDBAction(access.ActionQueryConsole)).Get("/query", s.handleQueryConsoleGet)
+			r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query", s.handleQueryConsolePost)
+			r.With(s.requireDBAction(access.ActionManageDrafts), s.queryBodyLimit).Post("/query/to-draft", s.handleQueryToDraft)
 			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleHistory)
 
 			r.Group(func(r chi.Router) {
@@ -251,7 +267,16 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 			s.renderError(w, r, http.StatusForbidden, "Invalid session.")
 			return
 		}
+		if isQueryConsoleRoute(r.URL.Path) {
+			maxBytes := 4*s.cfg.MaxQueryBytes + 64*1024
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		}
 		if err := r.ParseForm(); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				s.renderError(w, r, http.StatusRequestEntityTooLarge, "Request body is too large.")
+				return
+			}
 			s.renderError(w, r, http.StatusBadRequest, "Invalid form.")
 			return
 		}
@@ -265,6 +290,20 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isQueryConsoleRoute(path string) bool {
+	if !strings.HasPrefix(path, "/databases/") {
+		return false
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 3 && parts[0] == "databases" && parts[2] == "query" {
+		return true
+	}
+	if len(parts) == 4 && parts[0] == "databases" && parts[2] == "query" && parts[3] == "to-draft" {
+		return true
+	}
+	return false
 }
 
 func (s *Server) requirePlatformAdmin(next http.Handler) http.Handler {

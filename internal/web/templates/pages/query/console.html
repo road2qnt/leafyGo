@@ -1,0 +1,100 @@
+{{define "content"}}
+{{template "dbHeaderWith" dict "page" . "action" false}}
+{{$root := .}}
+{{with .Data}}
+<div class="stack">
+  {{/* Error display */}}
+  {{if .Error}}
+  <div class="alert alert--error" role="alert">
+    <div class="stack stack--sm">
+      <div>
+        <p class="alert__title">Query error{{if .SQLState}} [{{.SQLState}}]{{end}}</p>
+        {{if .IsWriteRejection}}
+        <p><strong>Console hanya untuk membaca data.</strong> Untuk mengubah data atau schema, gunakan <a href="/databases/{{$root.DB.ID}}/migrations">Migration</a>.</p>
+        {{else}}
+        <p>{{.Error}}</p>
+        {{end}}
+        {{if gt .Position 0}}<p class="text-sm muted">Error position: character {{.Position}}{{if gt .SQLErrorLine 0}} (line {{.SQLErrorLine}}){{end}}</p>{{end}}
+      </div>
+      {{if and .IsWriteRejection $root.Level.CanEdit}}
+      <form method="post" action="/databases/{{$root.DB.ID}}/query/to-draft">
+        <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+        <input type="hidden" name="sql" value="{{.SQL}}">
+        <button class="btn btn--secondary btn--sm" type="submit">{{template "icon" "plus"}}Buat draft migration dari SQL ini</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  {{/* Truncation notice */}}
+  {{with .Notice}}
+  <div class="alert alert--info" role="status">
+    <p>{{.}}</p>
+  </div>
+  {{end}}
+
+  {{/* Query Form */}}
+  <form class="form" method="post" action="/databases/{{$root.DB.ID}}/query">
+    <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+    <div class="field">
+      <div class="field__header">
+        <label class="field__label" for="query-sql">SQL Query</label>
+        <span class="badge badge--readonly">Read only</span>
+      </div>
+      <textarea id="query-sql" name="sql" class="textarea textarea--mono query-editor" rows="7" placeholder="SELECT * FROM table_name LIMIT 10;" required spellcheck="false">{{.SQL}}</textarea>
+    </div>
+    <div class="form__actions">
+      <button class="btn btn--primary" type="submit">{{template "icon" "play"}}Execute</button>
+      <p class="text-sm muted">Ad-hoc read queries are executed in a read-only transaction and automatically rolled back.</p>
+    </div>
+  </form>
+
+  {{/* Query Results */}}
+  {{with .Result}}
+  <div class="stack stack--sm">
+    <div class="detail-header">
+      <div class="cluster cluster--gap-sm">
+        <h2 class="detail-title">Result</h2>
+        <span class="badge badge--muted">{{.CommandTag}}</span>
+        <span class="text-sm muted">{{rowsLabel .RowCount}}</span>
+        <span class="text-sm muted">·</span>
+        <span class="text-sm muted">{{formatDuration .Duration}}</span>
+      </div>
+      {{if .Truncated}}
+      <span class="badge badge--warning">Truncated</span>
+      {{end}}
+    </div>
+
+    {{if .Rows}}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="Query results">
+      <table class="table table--data">
+        <thead>
+          <tr>
+            {{range .Columns}}
+            <th scope="col" class="mono">{{.}}</th>
+            {{end}}
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            {{range .}}
+            <td{{if .Truncated}} title="Value truncated for display"{{end}}>{{if .IsNull}}<span class="cell-null">NULL</span>{{else if eq .Text ""}}<span class="cell-null">''<span class="visually-hidden"> (empty string)</span></span>{{else}}{{truncate .Text 200}}{{end}}</td>
+            {{end}}
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty-state">
+      <p class="empty-state__title">No rows returned</p>
+      <p class="text-sm muted">The query completed with command tag <code>{{.CommandTag}}</code>.</p>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}

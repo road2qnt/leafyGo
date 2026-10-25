@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"leafygo/internal/domain"
+	"leafygo/internal/queryconsole"
 )
 
 // Kontrak data template (pageData.Data).
@@ -24,6 +25,7 @@ const (
 	navDBOverview     = "db-overview"
 	navDBSchema       = "db-schema"
 	navDBData         = "db-data"
+	navDBQuery        = "db-query"
 	navDBMigrations   = "db-migrations"
 	navDBDrafts       = "db-drafts"
 )
@@ -280,6 +282,18 @@ type dataView struct {
 	Page        *dataPage
 	Notice      string
 	TargetError string
+}
+
+// SQL Console
+type queryConsoleView struct {
+	SQL              string
+	Result           *queryconsole.Result
+	Error            string
+	SQLState         string
+	Position         int
+	SQLErrorLine     int
+	IsWriteRejection bool
+	Notice           string
 }
 
 // Migration

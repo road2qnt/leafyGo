@@ -29,6 +29,12 @@ func baseEnv(t *testing.T) {
 	withEnv(t, "MAX_MIGRATION_BYTES", "")
 	withEnv(t, "VIEWER_PAGE_SIZE", "")
 	withEnv(t, "VIEWER_MAX_PAGE_SIZE", "")
+	withEnv(t, "QUERY_TIMEOUT", "")
+	withEnv(t, "MAX_QUERY_BYTES", "")
+	withEnv(t, "QUERY_MAX_ROWS", "")
+	withEnv(t, "QUERY_MAX_CELL_BYTES", "")
+	withEnv(t, "QUERY_MAX_RESULT_BYTES", "")
+	withEnv(t, "QUERY_MAX_CONCURRENT", "")
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -87,6 +93,24 @@ func TestLoadTargetConfigDefaults(t *testing.T) {
 	if cfg.ViewerMaxPageSize != 100 {
 		t.Fatalf("ViewerMaxPageSize = %d", cfg.ViewerMaxPageSize)
 	}
+	if cfg.QueryTimeout != 15*time.Second {
+		t.Fatalf("QueryTimeout = %v", cfg.QueryTimeout)
+	}
+	if cfg.MaxQueryBytes != 65536 {
+		t.Fatalf("MaxQueryBytes = %d", cfg.MaxQueryBytes)
+	}
+	if cfg.QueryMaxRows != 1000 {
+		t.Fatalf("QueryMaxRows = %d", cfg.QueryMaxRows)
+	}
+	if cfg.QueryMaxCellBytes != 4096 {
+		t.Fatalf("QueryMaxCellBytes = %d", cfg.QueryMaxCellBytes)
+	}
+	if cfg.QueryMaxResultBytes != 2097152 {
+		t.Fatalf("QueryMaxResultBytes = %d", cfg.QueryMaxResultBytes)
+	}
+	if cfg.QueryMaxConcurrent != 4 {
+		t.Fatalf("QueryMaxConcurrent = %d", cfg.QueryMaxConcurrent)
+	}
 }
 
 func TestLoadTargetConfigOverrides(t *testing.T) {
@@ -98,6 +122,12 @@ func TestLoadTargetConfigOverrides(t *testing.T) {
 	withEnv(t, "MAX_MIGRATION_BYTES", "2048")
 	withEnv(t, "VIEWER_PAGE_SIZE", "20")
 	withEnv(t, "VIEWER_MAX_PAGE_SIZE", "40")
+	withEnv(t, "QUERY_TIMEOUT", "10s")
+	withEnv(t, "MAX_QUERY_BYTES", "32768")
+	withEnv(t, "QUERY_MAX_ROWS", "500")
+	withEnv(t, "QUERY_MAX_CELL_BYTES", "2048")
+	withEnv(t, "QUERY_MAX_RESULT_BYTES", "1048576")
+	withEnv(t, "QUERY_MAX_CONCURRENT", "8")
 
 	cfg, err := Load()
 	if err != nil {
@@ -121,6 +151,24 @@ func TestLoadTargetConfigOverrides(t *testing.T) {
 	if cfg.ViewerPageSize != 20 || cfg.ViewerMaxPageSize != 40 {
 		t.Fatalf("page sizes = %d/%d", cfg.ViewerPageSize, cfg.ViewerMaxPageSize)
 	}
+	if cfg.QueryTimeout != 10*time.Second {
+		t.Fatalf("QueryTimeout = %v", cfg.QueryTimeout)
+	}
+	if cfg.MaxQueryBytes != 32768 {
+		t.Fatalf("MaxQueryBytes = %d", cfg.MaxQueryBytes)
+	}
+	if cfg.QueryMaxRows != 500 {
+		t.Fatalf("QueryMaxRows = %d", cfg.QueryMaxRows)
+	}
+	if cfg.QueryMaxCellBytes != 2048 {
+		t.Fatalf("QueryMaxCellBytes = %d", cfg.QueryMaxCellBytes)
+	}
+	if cfg.QueryMaxResultBytes != 1048576 {
+		t.Fatalf("QueryMaxResultBytes = %d", cfg.QueryMaxResultBytes)
+	}
+	if cfg.QueryMaxConcurrent != 8 {
+		t.Fatalf("QueryMaxConcurrent = %d", cfg.QueryMaxConcurrent)
+	}
 }
 
 func TestLoadTargetConfigRejectsInvalid(t *testing.T) {
@@ -138,6 +186,14 @@ func TestLoadTargetConfigRejectsInvalid(t *testing.T) {
 		{name: "page zero", key: "VIEWER_PAGE_SIZE", val: "0"},
 		{name: "max page zero", key: "VIEWER_MAX_PAGE_SIZE", val: "0"},
 		{name: "max page below page", key: "VIEWER_MAX_PAGE_SIZE", val: "10", page: "20"},
+		{name: "query timeout zero", key: "QUERY_TIMEOUT", val: "0s"},
+		{name: "query timeout negative", key: "QUERY_TIMEOUT", val: "-5s"},
+		{name: "max query bytes zero", key: "MAX_QUERY_BYTES", val: "0"},
+		{name: "query max rows zero", key: "QUERY_MAX_ROWS", val: "0"},
+		{name: "query max cell bytes zero", key: "QUERY_MAX_CELL_BYTES", val: "0"},
+		{name: "query max result bytes zero", key: "QUERY_MAX_RESULT_BYTES", val: "0"},
+		{name: "query max concurrent zero", key: "QUERY_MAX_CONCURRENT", val: "0"},
+		{name: "query max concurrent negative", key: "QUERY_MAX_CONCURRENT", val: "-1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

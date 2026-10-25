@@ -34,6 +34,7 @@ func TestMinimumLevel(t *testing.T) {
 		{"manage drafts", ActionManageDrafts, domain.LevelEdit, true},
 		{"execute migration", ActionExecuteMigration, domain.LevelEdit, true},
 		{"explain migration", ActionExplainMigration, domain.LevelEdit, true},
+		{"query console", ActionQueryConsole, domain.LevelView, true},
 		{"unknown action", Action("delete_database"), domain.LevelNone, false},
 		{"empty action", Action(""), domain.LevelNone, false},
 	}
@@ -60,6 +61,7 @@ func TestCanAllActionsAndLevels(t *testing.T) {
 		{ActionManageDrafts, false, false, true},
 		{ActionExecuteMigration, false, false, true},
 		{ActionExplainMigration, false, false, true},
+		{ActionQueryConsole, false, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.action), func(t *testing.T) {

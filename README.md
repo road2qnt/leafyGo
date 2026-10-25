@@ -9,6 +9,7 @@ IF3110 Milestone 1: Database Management Platform.
 - Platform Admin untuk user, group, koneksi database, dan pemberian akses per group
   (View Only atau View + Edit).
 - Database viewer: schema, table, column, constraint, index, dan paginated data.
+- SQL Query Console: eksekusi query read-only interaktif dengan visualisasi hasil tabular, pembatasan ukuran hasil, dan perlindungan multi-lapis.
 - Migration editor dengan draft, EXPLAIN, eksekusi dalam satu transaksi, dan riwayat linear.
 - Bonus: EXPLAIN.
 
@@ -65,6 +66,11 @@ Semua parameter terdapat di `.env.example`. Yang paling relevan:
 | `SESSION_GRACE_PERIOD`     | 10s                            | Masa berlaku identifier lama setelah rotasi |
 | `COOKIE_SECURE`            | true bila `APP_ENV=production` | Atribut Secure pada cookie                  |
 | `MIGRATION_TIMEOUT`        | 30s                            | Batas total eksekusi migration              |
+| `QUERY_TIMEOUT`            | 15s                            | Batas waktu eksekusi query SQL Console      |
+| `QUERY_MAX_ROWS`           | 1000                           | Batas baris hasil query console             |
+| `QUERY_MAX_CELL_BYTES`     | 4096                           | Batas ukuran string per sel (4 KiB)         |
+| `QUERY_MAX_RESULT_BYTES`   | 2097152                        | Batas akumulasi ukuran hasil (2 MiB)        |
+| `QUERY_MAX_CONCURRENT`     | 4                              | Batas query console konkuren global         |
 
 ## Dokumentasi
 

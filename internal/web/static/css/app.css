@@ -612,6 +612,11 @@ legend { padding: 0 var(--space-2); font-weight: 600; }
 .badge--failed { background: var(--red-50); color: var(--red-700); border-color: var(--red-700); }
 .badge--running { background: var(--amber-50); color: var(--amber-800); border-color: var(--amber-800); }
 .badge--kind { background: var(--canvas); color: var(--ink-soft); border-color: var(--ink-soft); }
+.badge--readonly { background: var(--blue-50); color: var(--blue-700); border-color: var(--blue-700); }
+.badge--muted { background: var(--canvas); color: var(--ink-soft); border-color: var(--line-soft); }
+.badge--warning { background: var(--amber-50); color: var(--amber-800); border-color: var(--amber-800); }
+
+.query-editor { min-height: 10rem; font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6; }
 
 /* Alert dan flash */
 

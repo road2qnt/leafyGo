@@ -18,11 +18,12 @@ const (
 	ActionManageDrafts     Action = "manage_drafts"
 	ActionExecuteMigration Action = "execute_migration"
 	ActionExplainMigration Action = "explain_migration"
+	ActionQueryConsole     Action = "query_console"
 )
 
 func MinimumLevel(a Action) (domain.AccessLevel, bool) {
 	switch a {
-	case ActionViewOverview, ActionViewSchema, ActionViewData, ActionViewHistory:
+	case ActionViewOverview, ActionViewSchema, ActionViewData, ActionViewHistory, ActionQueryConsole:
 		return domain.LevelView, true
 	case ActionManageDrafts, ActionExecuteMigration, ActionExplainMigration:
 		return domain.LevelEdit, true

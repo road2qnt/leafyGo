@@ -35,6 +35,13 @@ type Config struct {
 	MaxMigrationBytes            int64
 	ViewerPageSize               int
 	ViewerMaxPageSize            int
+
+	QueryTimeout        time.Duration
+	MaxQueryBytes       int64
+	QueryMaxRows        int
+	QueryMaxCellBytes   int64
+	QueryMaxResultBytes int64
+	QueryMaxConcurrent  int
 }
 
 func Load() (Config, error) {
@@ -94,6 +101,29 @@ func Load() (Config, error) {
 	}
 	cfg.ViewerPageSize = int(viewerPageSize)
 	cfg.ViewerMaxPageSize = int(viewerMaxPageSize)
+
+	if cfg.QueryTimeout, err = durationEnv("QUERY_TIMEOUT", 15*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxQueryBytes, err = positiveInt64Env("MAX_QUERY_BYTES", 65536); err != nil {
+		return Config{}, err
+	}
+	queryMaxRows, err := positiveInt64Env("QUERY_MAX_ROWS", 1000)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.QueryMaxRows = int(queryMaxRows)
+	if cfg.QueryMaxCellBytes, err = positiveInt64Env("QUERY_MAX_CELL_BYTES", 4096); err != nil {
+		return Config{}, err
+	}
+	if cfg.QueryMaxResultBytes, err = positiveInt64Env("QUERY_MAX_RESULT_BYTES", 2097152); err != nil {
+		return Config{}, err
+	}
+	queryMaxConcurrent, err := positiveInt64Env("QUERY_MAX_CONCURRENT", 4)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.QueryMaxConcurrent = int(queryMaxConcurrent)
 
 	if cfg.UIPreview, err = boolEnv("UI_PREVIEW", false); err != nil {
 		return Config{}, err

@@ -67,6 +67,7 @@ Definisi terdapat di `internal/access/policy.go`.
 | Aksi                               | View Only | View + Edit |
 | ---------------------------------- | --------- | ----------- |
 | Lihat overview, schema, data       | Ya        | Ya          |
+| Buka & jalankan SQL Console        | Ya        | Ya          |
 | Lihat riwayat dan detail migration | Ya        | Ya          |
 | Buat, ubah, hapus draft migration  | Tidak     | Ya          |
 | Jalankan EXPLAIN                   | Tidak     | Ya          |
@@ -74,7 +75,24 @@ Definisi terdapat di `internal/access/policy.go`.
 
 Penolakan akses dicatat di log sebagai `access denied` dengan actor, target, dan aksi.
 
+## SQL Query Console & Keamanan Read-Only
+
+SQL Query Console dirancang untuk eksplorasi data interaktif bagi role `View Only` dan `View + Edit`. Untuk membedakan kebutuhan eksplorasi dengan perubahan data, sistem memberlakukan pemisahan ketat antara Console dan Migration:
+- **Query Console**: Eksklusif untuk pembacaan data (`SELECT`, `WITH`, `TABLE`, `VALUES`, `SHOW`, `EXPLAIN`). Pernyataan pengubah data ditolak dan pengguna `View + Edit` diarahkan untuk membuat draft migration via handoff button.
+- **Migration**: Tempat tunggal untuk DDL dan manipulasi data (`INSERT`, `UPDATE`, `DELETE`, `ALTER`, dll.) dengan audit riwayat linear dan transaksi atomik.
+
+### Jaminan Read-Only (Defense-in-Depth)
+1. **Pre-connection Guard**: Memvalidasi SQL sebelum membuka koneksi target. SQL harus berupa 1 pernyataan tunggal, bebas karakter NUL, tidak melebihi `MAX_QUERY_BYTES` (default 64 KiB), tidak mengandung kata kunci kontrol transaksi (`BEGIN`, `COMMIT`, `SET TRANSACTION`), dan kata kunci pertama harus termasuk dalam allowlist.
+2. **PostgreSQL Engine Enforcement**: Setiap query dieksekusi dalam transaksi terisolasi `BEGIN READ ONLY` dengan rollback otomatis saat selesai atau pemutusan koneksi cepat saat pembatasan tercapai. PostgreSQL menolak modifikasi data (error code `25006` `read_only_sql_transaction`), pembuatan tabel sementara (`SELECT INTO`), fungsi penulisan sequence, serta CTE yang memodifikasi data.
+
+### Batasan dan Rekomendasi Least-Privilege
+- **Superuser & Side-effect Functions**: Modifikasi data tertentu di PostgreSQL tetap dapat dipicu oleh fungsi khusus (misal `dblink` eksternal atau eksekusi fungsi volatile berhak akses superuser). Target database **wajib dikonfigurasi menggunakan role berprinsip least-privilege** (non-superuser, hak akses baca sesuai kebutuhan).
+- **Signal Functions Risk**: Fungsi bawaan seperti `pg_terminate_backend()` atau `pg_cancel_backend()` dapat dipanggil dalam klausa `SELECT` jika role target memiliki hak sinyal ke proses lain. Penggunaan akun target terdedikasi sangat direkomendasikan untuk mengisolasi dampak sinyal.
+- **Lock Contention**: Query konsol dibatasi secara otomatis oleh `statement_timeout` (default 15s) dan `lock_timeout` (3s) agar pembacaan tabel besar tidak menahan lock yang memblokir migrasi skema atau operasi aplikasi lain.
+- **Zero Storage Rationale**: LeafyGo secara sengaja **tidak menyimpan teks query pengguna maupun data hasil query** di database platform. Log sistem hanya mencatat metadata operasional yang aman (durasi, jumlah baris, byte count, status) tanpa merekam payload SQL atau isi baris data demi perlindungan privasi dan kerahasiaan data target.
+
 ## Penanganan kegagalan
 
 - Koneksi target yang gagal (host tidak ada, kredensial salah, timeout) ditampilkan sebagai pesan yang sudah disanitasi tanpa DSN atau password. Batas koneksi diatur `TARGET_CONNECT_TIMEOUT` (5 detik).
 - Query viewer dibatasi `VIEWER_STATEMENT_TIMEOUT` (5 detik) dan ukuran halaman `VIEWER_PAGE_SIZE` (50, maksimum 100).
+- Query console dibatasi oleh `QUERY_TIMEOUT` (default 15 detik), semaphore konkurensi `QUERY_MAX_CONCURRENT` (default 4), batas baris `QUERY_MAX_ROWS` (default 1.000 baris), batas sel `QUERY_MAX_CELL_BYTES` (default 4 KiB), dan total hasil `QUERY_MAX_RESULT_BYTES` (default 2 MiB).
