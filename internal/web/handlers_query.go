@@ -106,6 +106,44 @@ func (s *Server) handleQueryConsolePost(w http.ResponseWriter, r *http.Request) 
 	s.render(w, r, http.StatusOK, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, v))
 }
 
+func (s *Server) handleQueryConsoleExplain(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkTarget(r); err != nil {
+		s.renderQueryDown(w, r, err)
+		return
+	}
+
+	sql := strings.ReplaceAll(r.FormValue("sql"), "\r\n", "\n")
+	v := queryConsoleView{
+		SQL: sql,
+	}
+
+	if strings.TrimSpace(sql) == "" {
+		v.Error = "SQL must not be empty"
+		s.render(w, r, http.StatusUnprocessableEntity, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, v))
+		return
+	}
+
+	if msg, line := explainPrecheck(sql); msg != "" {
+		v.Explain, v.SQLErrorLine = &explainView{Error: msg}, line
+		s.render(w, r, http.StatusOK, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, v))
+		return
+	}
+
+	plan, err := s.targets.Explain(r.Context(), *currentDB(r), sql, s.cfg.QueryTimeout)
+	if err != nil {
+		if !s.targetReachable(r) {
+			s.renderQueryDown(w, r, err)
+			return
+		}
+		v.Explain, v.SQLErrorLine = explainFailure(err, sql)
+		s.render(w, r, http.StatusOK, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, v))
+		return
+	}
+
+	v.Explain = &explainView{Plan: plan}
+	s.render(w, r, http.StatusOK, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, v))
+}
+
 func (s *Server) handleQueryToDraft(w http.ResponseWriter, r *http.Request) {
 	sql := strings.ReplaceAll(r.FormValue("sql"), "\r\n", "\n")
 	title := strings.TrimSpace(r.FormValue("title"))

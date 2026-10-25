@@ -288,6 +288,7 @@ type dataView struct {
 type queryConsoleView struct {
 	SQL              string
 	Result           *queryconsole.Result
+	Explain          *explainView
 	Error            string
 	SQLState         string
 	Position         int

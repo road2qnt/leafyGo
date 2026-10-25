@@ -335,6 +335,29 @@ func TestDraftFormsPostToDraftRoutes(t *testing.T) {
 	}
 }
 
+func TestQueryConsoleFormRoutes(t *testing.T) {
+	doc := renderPreview(t, "viewer-query-explain")
+	action := "/databases/" + fxToko.ID.String() + "/query"
+	var form string
+	for _, f := range forms(doc) {
+		if formAction(f) == action {
+			form = f
+		}
+	}
+	if form == "" {
+		t.Fatalf("no form posts to %s", action)
+	}
+	var explainBtnFound bool
+	for _, b := range elements(form, "button") {
+		if b.attrs["formaction"] == action+"/explain" {
+			explainBtnFound = true
+		}
+	}
+	if !explainBtnFound {
+		t.Errorf("expected button with formaction %s/explain", action)
+	}
+}
+
 func TestUserStatusControls(t *testing.T) {
 	ega := uuid.MustParse("00000000-0000-4000-8000-0000000000a9")
 	eko := fxUserOptions()[4].ID

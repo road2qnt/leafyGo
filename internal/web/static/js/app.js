@@ -390,6 +390,21 @@
     });
   }
 
+  function initQueryEditorShortcuts() {
+    const editors = document.querySelectorAll(".query-editor");
+    editors.forEach((editor) => {
+      editor.addEventListener("keydown", (e) => {
+        const mod = e.ctrlKey || e.metaKey;
+        if (e.key === "Enter" && mod && editor.form) {
+          e.preventDefault();
+          const btn = editor.form.querySelector(e.shiftKey ? '[data-shortcut="explain"]' : 'button[type="submit"]:not([formaction])');
+          if (btn) editor.form.requestSubmit(btn);
+        }
+      });
+    });
+  }
+
   initTablePagination();
   initCombobox();
+  initQueryEditorShortcuts();
 })();

@@ -169,6 +169,7 @@ func (s *Server) Handler() http.Handler {
 			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
 			r.With(s.requireDBAction(access.ActionQueryConsole)).Get("/query", s.handleQueryConsoleGet)
 			r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query", s.handleQueryConsolePost)
+			r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query/explain", s.handleQueryConsoleExplain)
 			r.With(s.requireDBAction(access.ActionManageDrafts), s.queryBodyLimit).Post("/query/to-draft", s.handleQueryToDraft)
 			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleHistory)
 
@@ -300,7 +301,7 @@ func isQueryConsoleRoute(path string) bool {
 	if len(parts) == 3 && parts[0] == "databases" && parts[2] == "query" {
 		return true
 	}
-	if len(parts) == 4 && parts[0] == "databases" && parts[2] == "query" && parts[3] == "to-draft" {
+	if len(parts) == 4 && parts[0] == "databases" && parts[2] == "query" && (parts[3] == "to-draft" || parts[3] == "explain") {
 		return true
 	}
 	return false

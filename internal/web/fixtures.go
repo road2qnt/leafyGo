@@ -425,6 +425,12 @@ func previewGroups() []previewGroup {
 			{"viewer-query-failed", "SQL Console, target unreachable", "query/console.html", func() pageData {
 				return downPage(dbPage("SQL Console", navDBQuery, fxArsip, fxAndi, domain.LevelView, queryConsoleView{TargetError: fxTargetError}))
 			}},
+			{"viewer-query-explain", "SQL Console, EXPLAIN result", "query/console.html", func() pageData {
+				return dbPage("SQL Console", navDBQuery, fxToko, fxAndi, domain.LevelView, queryConsoleView{
+					SQL:     "SELECT * FROM orders WHERE status = 'pending';",
+					Explain: &explainView{Plan: fxExplainPlan},
+				})
+			}},
 			{"viewer-schema", "Schema, table list", "viewer/schema.html", func() pageData {
 				return dbPage("Schema", navDBSchema, fxToko, fxAndi, domain.LevelView, schemaView{Tables: fxTables()})
 			}},

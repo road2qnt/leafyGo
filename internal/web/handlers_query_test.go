@@ -257,3 +257,88 @@ func TestQueryConsoleTargetUnreachable(t *testing.T) {
 	}
 }
 
+func TestQueryConsoleExplainSuccess(t *testing.T) {
+	e := newQueryTestEnv(t)
+	ctx := context.Background()
+
+	// 1. View user can explain a valid SELECT query
+	rec := postForm(t, e.srv, e.base+"/query/explain", e.viewSID, e.viewCSRF, url.Values{"sql": {"SELECT 42 AS my_num"}})
+	assertStatus(t, rec, http.StatusOK, "explain SELECT query")
+	assertBody(t, rec, "EXPLAIN result", "contains EXPLAIN result heading")
+	assertBody(t, rec, "Result", "plan contains Result node")
+	assertBody(t, rec, "SELECT 42 AS my_num", "preserves SQL in editor")
+
+	// Verify no migration history was created
+	hist, err := e.st.ListMigrationHistory(ctx, e.conn.ID, 10)
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(hist) != 0 {
+		t.Fatalf("expected 0 migration history records, got %d", len(hist))
+	}
+}
+
+func TestQueryConsoleExplainErrors(t *testing.T) {
+	e := newQueryTestEnv(t)
+
+	// 1. Empty SQL returns 422
+	emptyRec := postForm(t, e.srv, e.base+"/query/explain", e.viewSID, e.viewCSRF, url.Values{"sql": {"   "}})
+	assertStatus(t, emptyRec, http.StatusUnprocessableEntity, "empty sql returns 422")
+	assertBody(t, emptyRec, "SQL must not be empty", "error message for empty sql")
+
+	// 2. Multi-statement rejected by explain precheck with 200 + warning alert
+	multiRec := postForm(t, e.srv, e.base+"/query/explain", e.viewSID, e.viewCSRF, url.Values{"sql": {"SELECT 1; SELECT 2"}})
+	assertStatus(t, multiRec, http.StatusOK, "multi-statement explain")
+	assertBody(t, multiRec, "one statement at a time", "multi-statement warning")
+	assertBody(t, multiRec, "alert--warning", "warning alert rendered")
+
+	// 3. DDL rejected by explain precheck with 200 + warning alert
+	ddlRec := postForm(t, e.srv, e.base+"/query/explain", e.viewSID, e.viewCSRF, url.Values{"sql": {"CREATE TABLE foo (id int)"}})
+	assertStatus(t, ddlRec, http.StatusOK, "ddl explain")
+	assertBody(t, ddlRec, "only works on a single SELECT", "ddl explain rejected")
+	assertBody(t, ddlRec, "alert--warning", "warning alert rendered")
+
+	// 4. Target error surfaces gracefully in explainPanel
+	targetErrRec := postForm(t, e.srv, e.base+"/query/explain", e.viewSID, e.viewCSRF, url.Values{"sql": {"SELECT * FROM non_existent_table_xyz"}})
+	assertStatus(t, targetErrRec, http.StatusOK, "target error explain")
+	assertBody(t, targetErrRec, "does not exist", "target error message in explainPanel")
+	assertBody(t, targetErrRec, "alert--warning", "warning alert rendered")
+}
+
+func TestQueryConsoleExplainPermissions(t *testing.T) {
+	e := newQueryTestEnv(t)
+
+	// 1. Edit user can explain
+	rec := postForm(t, e.srv, e.base+"/query/explain", e.editSID, e.editCSRF, url.Values{"sql": {"SELECT 1"}})
+	assertStatus(t, rec, http.StatusOK, "edit user explain")
+
+	// 2. Admin user is forbidden
+	rec = postForm(t, e.srv, e.base+"/query/explain", e.adminSID, "any", url.Values{"sql": {"SELECT 1"}})
+	assertStatus(t, rec, http.StatusForbidden, "admin user explain forbidden")
+
+	// 3. Invalid CSRF is forbidden
+	rec = postForm(t, e.srv, e.base+"/query/explain", e.viewSID, "bad_token", url.Values{"sql": {"SELECT 1"}})
+	assertStatus(t, rec, http.StatusForbidden, "invalid csrf explain forbidden")
+}
+
+func TestQueryConsoleExplainTargetUnreachable(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+	user := seedUser(t, st, "cindy", "password123", false)
+	conn := seedDBConnection(t, st, "unreachable_db_explain")
+	group, _ := st.CreateGroup(ctx, "viewers", "")
+	_ = st.AddGroupMember(ctx, group.ID, user.ID)
+	_ = st.SetGroupAccess(ctx, group.ID, conn.ID, domain.LevelView)
+
+	sid, csrf := login(t, srv, "cindy", "password123")
+	base := "/databases/" + conn.ID.String()
+
+	rec := postForm(t, srv, base+"/query/explain", sid, csrf, url.Values{"sql": {"SELECT 1"}})
+	assertStatus(t, rec, http.StatusOK, "unreachable target POST /query/explain")
+	assertBody(t, rec, "Cannot connect to the database", "shows target error alert on explain")
+	if strings.Contains(rec.Body.String(), "id=\"query-sql\"") {
+		t.Fatal("query-sql textarea should not be rendered on POST /query/explain when target is unreachable")
+	}
+}
+
+

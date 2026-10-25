@@ -49,9 +49,15 @@
     </div>
     <div class="form__actions">
       <button class="btn btn--primary" type="submit">{{template "icon" "play"}}Execute</button>
+      <button class="btn" type="submit" formaction="/databases/{{$root.DB.ID}}/query/explain" formnovalidate data-shortcut="explain">Explain</button>
       <p class="text-sm muted">Ad-hoc read queries are executed in a read-only transaction and automatically rolled back.</p>
     </div>
   </form>
+
+  {{/* Explain Result */}}
+  {{with .Explain}}
+  {{template "explainPanel" .}}
+  {{end}}
 
   {{/* Query Results */}}
   {{with .Result}}
