@@ -122,14 +122,28 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/", s.handleDashboard)
 
 		r.Route("/admin", func(r chi.Router) {
-			// Jibril: admin
 			r.Use(s.requirePlatformAdmin)
-			r.Get("/users", s.stubNotImplemented("admin users — Jibril"))
-			r.Post("/users", s.stubNotImplemented("admin users — Jibril"))
-			r.Get("/groups", s.stubNotImplemented("admin groups — Jibril"))
-			r.Post("/groups", s.stubNotImplemented("admin groups — Jibril"))
-			r.Get("/databases", s.stubNotImplemented("admin databases — Jibril"))
-			r.Post("/databases", s.stubNotImplemented("admin databases — Jibril"))
+			r.Get("/users", s.handleAdminUsers)
+			r.Post("/users", s.handleAdminUserCreate)
+			r.Post("/users/{userID}/password", s.handleAdminUserPassword)
+			r.Post("/users/{userID}/active", s.handleAdminUserActive)
+
+			r.Get("/groups", s.handleAdminGroups)
+			r.Get("/groups/new", s.handleAdminGroupNew)
+			r.Post("/groups", s.handleAdminGroupCreate)
+			r.Get("/groups/{groupID}", s.handleAdminGroup)
+			r.Post("/groups/{groupID}", s.handleAdminGroupUpdate)
+			r.Post("/groups/{groupID}/members", s.handleAdminGroupMembers)
+			r.Post("/groups/{groupID}/access", s.handleAdminGroupAccess)
+			r.Post("/groups/{groupID}/delete", s.handleAdminGroupDelete)
+
+			r.Get("/databases", s.handleAdminDatabases)
+			r.Get("/databases/new", s.handleAdminDatabaseNew)
+			r.Post("/databases", s.handleAdminDatabaseCreate)
+			r.Get("/databases/{dbID}", s.handleAdminDatabase)
+			r.Post("/databases/{dbID}", s.handleAdminDatabaseUpdate)
+			r.Post("/databases/{dbID}/test", s.handleAdminDatabaseTest)
+			r.Post("/databases/{dbID}/delete", s.handleAdminDatabaseDelete)
 		})
 
 		r.Route("/databases/{id}", func(r chi.Router) {
