@@ -9,18 +9,73 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro,z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  targets-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - targetsdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  analytics-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    volumes:
+      - analyticsdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  seed:
+    build: .
+    entrypoint: ["/seed"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      targets-db:
+        condition: service_healthy
+      analytics-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/leafygo?sslmode=disable
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      APP_ENV: ${APP_ENV:-development}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-password123}
+      SEED_TARGETS_HOST: targets-db
+      SEED_TARGETS_PORT: "5432"
+      SEED_ANALYTICS_HOST: analytics-db
+      SEED_ANALYTICS_PORT: "5432"
+
   app:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     environment:
@@ -33,3 +88,5 @@ services:
 
 volumes:
   pgdata:
+  targetsdata:
+  analyticsdata:
