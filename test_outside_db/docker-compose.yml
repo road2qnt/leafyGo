@@ -1,0 +1,28 @@
+services:
+  outside-db:
+    image: postgres:18
+    container_name: leafygo-outside-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: outside_corp
+      POSTGRES_USER: outside_admin
+      POSTGRES_PASSWORD: outside_secret_123
+    ports:
+      - "5438:5432"
+    volumes:
+      - outside_pgdata:/var/lib/postgresql
+      - ./seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U outside_admin -d outside_corp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - outside-network
+
+networks:
+  outside-network:
+    driver: bridge
+
+volumes:
+  outside_pgdata:
