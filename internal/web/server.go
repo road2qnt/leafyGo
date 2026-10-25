@@ -104,7 +104,11 @@ func (s *Server) Handler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
+	r.Handle("/static/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		staticHandler.ServeHTTP(w, req)
+	}))
 
 	if s.cfg.UIPreview {
 		r.Get("/_preview", s.handlePreviewIndex)
@@ -424,11 +428,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 		"dict":            dict,
 		"join":            strings.Join,
 		"count":           countLabel,
+		"rowsLabel":       rowsLabel,
 		"lines":           func(s string) []string { return strings.Split(strings.TrimRight(s, "\n"), "\n") },
 		"list":            func(v ...string) []string { return v },
 		"add":             func(a, b int) int { return a + b },
 		"sub":             func(a, b int) int { return a - b },
-		"rowsLabel":       rowsLabel,
 		"dash": func(v string) string {
 			if strings.TrimSpace(v) == "" {
 				return "—"
