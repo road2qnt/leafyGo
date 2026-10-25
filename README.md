@@ -1,10 +1,18 @@
-# leafyGo — IF3110 Milestone 1 (slice: backend/auth/RBAC — Ega)
+# leafyGo // K01-18
 
-> Status: slice fondasi + authentication + RBAC. Stub route untuk
-> admin/viewer/migration tersedia (501) dan menunggu slice Jibril.
-> Styling/template final + demo seed menunggu slice Putra.
+IF3110 Milestone 1: Database Management Platform.
 
-## Cara jalan (Docker)
+## Fitur
+
+- Authentication dengan hash argon2id, session opaque dengan idle timeout, absolute
+  expiration, rotasi berkala dan saat privilege naik, serta proteksi CSRF.
+- Platform Admin untuk user, group, koneksi database, dan pemberian akses per group
+  (View Only atau View + Edit).
+- Database viewer: schema, table, column, constraint, index, dan paginated data.
+- Migration editor dengan draft, EXPLAIN, eksekusi dalam satu transaksi, dan riwayat linear.
+- Bonus: EXPLAIN.
+
+## Setup
 
 ```bash
 docker compose up --build
@@ -13,7 +21,15 @@ docker compose up --build
 Buka <http://localhost:8080>, login dengan admin dari env
 (`ADMIN_USERNAME`/`ADMIN_PASSWORD`).
 
-## Cara jalan tanpa Docker
+Compose otomatis menjalankan service one-shot `seed` (`cmd/seed`) sebelum `app`.
+
+Untuk rebuild app tanpa menjalankan seed (database harus sudah siap):
+
+```bash
+docker compose up -d --build --no-deps --force-recreate app
+```
+
+## Cara menjalankan tanpa Docker
 
 ```bash
 createdb leafygo
@@ -24,7 +40,10 @@ export ADMIN_PASSWORD=admin12345
 go run ./cmd/server
 ```
 
-Skema metadata (`001_init.sql`) diterapkan otomatis saat startup.
+Skema metadata (`internal/platform/migrations`) diterapkan otomatis saat startup.
+
+Untuk mengisi data seed, jalankan database dengan `docker compose up -d db targets-db analytics-db`, lalu
+`make seed` dengan env yang sama seperti server (lihat `.env.example` untuk `SEED_*`).
 
 ## Test
 
@@ -34,14 +53,31 @@ TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/leafygo_test?sslm
   go test -p 1 ./...                            # unit + integration
 ```
 
-`-p 1` diperlukan karena integration test memakai satu database dan truncate.
+## Konfigurasi
 
-## Pembagian kerja (tubes 3 orang)
+Semua parameter terdapat di `.env.example`. Yang paling relevan:
 
-| Nama | Slice | Bukti kontribusi |
-|---|---|---|
-| Ega | Fondasi, auth, session, CSRF, RBAC, dashboard | repo/commit slice ini |
-| Jibril | Admin CRUD, viewer, migration | menyusul di repo ini |
-| Putra | Frontend, docs, demo seed | menyusul di repo ini |
+| Env                        | Default                        | Fungsi                                      |
+| -------------------------- | ------------------------------ | ------------------------------------------- |
+| `SESSION_IDLE_TIMEOUT`     | 30m                            | Idle timeout session                        |
+| `SESSION_ABSOLUTE_TIMEOUT` | 8h                             | Umur maksimum session                       |
+| `SESSION_ROTATE_INTERVAL`  | 15m                            | Interval rotasi identifier                  |
+| `SESSION_GRACE_PERIOD`     | 10s                            | Masa berlaku identifier lama setelah rotasi |
+| `COOKIE_SECURE`            | true bila `APP_ENV=production` | Atribut Secure pada cookie                  |
+| `MIGRATION_TIMEOUT`        | 30s                            | Batas total eksekusi migration              |
 
-Kontrak antar slice: lihat `SEAM.md`.
+## Dokumentasi
+
+Parameter session, rotasi, pencabutan akses, CSRF, akses efektif, dan matriks aksi terdapat di
+[docs/keamanan-dan-akses.md](docs/keamanan-dan-akses.md).
+
+Isi data seed, daftar user, dan
+ketentuan reset ada di [docs/seed.md](docs/seed.md).
+
+## Pembagian kerja
+
+|   NIM    | Nama                    | Bagian kerja                                  |
+| :------: | ----------------------- | --------------------------------------------- |
+| 13524115 | Ega Luthfi Rais         | Fondasi, auth, session, CSRF, RBAC, dashboard |
+| 13523085 | Muhammad Jibril Ibrahim | Admin CRUD, viewer, migration                 |
+| 13523037 | Buege Mahara Putra      | Frontend, seeder                              |
