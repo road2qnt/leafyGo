@@ -216,24 +216,30 @@ func TestViewOnlyCannotReachEditRoutes(t *testing.T) {
 		base + "/":           http.StatusOK,
 		base + "/schema":     http.StatusBadGateway,
 		base + "/data":       http.StatusBadGateway,
-		base + "/migrations": http.StatusNotImplemented,
+		base + "/migrations": http.StatusOK,
 	} {
 		if rec := getWithSession(t, srv, path, sid); rec.Code != want {
 			t.Fatalf("GET %s status = %d; want %d (passed RBAC)", path, rec.Code, want)
 		}
 	}
 
-	if rec := getWithSession(t, srv, base+"/migrations/new", sid); rec.Code != http.StatusForbidden {
-		t.Fatalf("GET editor status = %d; want 403", rec.Code)
+	for _, path := range []string{base + "/migrations/new", base + "/migrations/drafts"} {
+		if rec := getWithSession(t, srv, path, sid); rec.Code != http.StatusForbidden {
+			t.Fatalf("GET %s status = %d; want 403", path, rec.Code)
+		}
 	}
-	for _, path := range []string{base + "/migrations", base + "/migrations/explain"} {
+	for _, path := range editPostPaths(base) {
 		if rec := postForm(t, srv, path, sid, csrf, nil); rec.Code != http.StatusForbidden {
 			t.Fatalf("POST %s status = %d; want 403", path, rec.Code)
 		}
 	}
 }
 
-func TestAdminDeniedOnAllDatabaseStubs(t *testing.T) {
+func editPostPaths(base string) []string {
+	return []string{base + "/migrations/drafts", base + "/migrations/drafts/explain", base + "/migrations/drafts/execute"}
+}
+
+func TestAdminDeniedOnAllDatabaseRoutes(t *testing.T) {
 	srv, st := testServer(t)
 	seedUser(t, st, "admin", "password123", true)
 	conn := seedDBConnection(t, st, "demo")
@@ -241,7 +247,7 @@ func TestAdminDeniedOnAllDatabaseStubs(t *testing.T) {
 	base := "/databases/" + conn.ID.String()
 	const wantMessage = "Platform Admin accounts cannot access database tools."
 
-	for _, path := range []string{base + "/", base + "/schema", base + "/data", base + "/migrations", base + "/migrations/new"} {
+	for _, path := range []string{base + "/", base + "/schema", base + "/data", base + "/migrations", base + "/migrations/new", base + "/migrations/drafts"} {
 		rec := getWithSession(t, srv, path, sid)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("GET %s status = %d; want 403", path, rec.Code)
@@ -250,7 +256,7 @@ func TestAdminDeniedOnAllDatabaseStubs(t *testing.T) {
 			t.Fatalf("GET %s body does not contain admin denial message", path)
 		}
 	}
-	for _, path := range []string{base + "/migrations", base + "/migrations/explain"} {
+	for _, path := range editPostPaths(base) {
 		rec := postForm(t, srv, path, sid, csrf, nil)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("POST %s status = %d; want 403", path, rec.Code)

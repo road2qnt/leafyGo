@@ -147,14 +147,24 @@ func (s *Server) Handler() http.Handler {
 		})
 
 		r.Route("/databases/{id}", func(r chi.Router) {
-			// Jibril: viewer + migration
 			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.handleOverview)
 			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.handleSchema)
 			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
-			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.stubNotImplemented("migration history — Jibril"))
-			r.With(s.requireDBAction(access.ActionManageDrafts)).Get("/migrations/new", s.stubNotImplemented("migration editor — Jibril"))
-			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations", s.stubNotImplemented("migration execute — Jibril"))
-			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/explain", s.stubNotImplemented("migration explain — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleHistory)
+
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireDBAction(access.ActionManageDrafts))
+				r.Get("/migrations/drafts", s.handleDrafts)
+				r.Get("/migrations/new", s.handleDraftNew)
+				r.Post("/migrations/drafts", s.handleDraftCreate)
+				r.Get("/migrations/drafts/{draftID}", s.handleDraftEditor)
+				r.Post("/migrations/drafts/{draftID}", s.handleDraftSave)
+				r.Post("/migrations/drafts/{draftID}/delete", s.handleDraftDelete)
+			})
+			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/explain", s.handleDraftNewExplain)
+			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/{draftID}/explain", s.handleDraftExplain)
+			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/execute", s.handleDraftNewExecute)
+			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/{draftID}/execute", s.handleDraftExecute)
 		})
 	})
 
@@ -166,15 +176,6 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	return r
-}
-
-func (s *Server) stubNotImplemented(what string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.render(w, r, http.StatusNotImplemented, "system/stub.html", pageData{
-			Title:   "Not implemented",
-			Message: "The " + what + " section is not implemented in this slice yet.",
-		})
-	}
 }
 
 type ctxKey int
