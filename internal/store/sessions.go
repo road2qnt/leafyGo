@@ -29,10 +29,10 @@ func (s *Store) GetSession(ctx context.Context, idHash []byte) (domain.Session, 
 	var sess domain.Session
 	err := s.pool.QueryRow(ctx, `
 		select id_hash, user_id, csrf_token, created_at, last_seen_at, idle_expires_at,
-		       absolute_expires_at, rotated_to, grace_expires_at, revoked_at
+		       absolute_expires_at, rotated_to, grace_expires_at, revoked_at, force_rotate
 		from sessions where id_hash=$1`, idHash).
 		Scan(&sess.IDHash, &sess.UserID, &sess.CSRFToken, &sess.CreatedAt, &sess.LastSeenAt,
-			&sess.IdleExpiresAt, &sess.AbsoluteExpiresAt, &sess.RotatedTo, &sess.GraceExpiresAt, &sess.RevokedAt)
+			&sess.IdleExpiresAt, &sess.AbsoluteExpiresAt, &sess.RotatedTo, &sess.GraceExpiresAt, &sess.RevokedAt, &sess.ForceRotate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Session{}, ErrNotFound
 	}
@@ -92,6 +92,27 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID uuid.UUID) error 
 	_, err := s.pool.Exec(ctx, `update sessions set revoked_at=now() where user_id=$1 and revoked_at is null`, userID)
 	if err != nil {
 		return fmt.Errorf("revoke user sessions: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) MarkUserSessionsForRotation(ctx context.Context, userID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		update sessions set force_rotate=true
+		where user_id=$1 and revoked_at is null and rotated_to is null`, userID)
+	if err != nil {
+		return fmt.Errorf("mark user sessions for rotation: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) MarkGroupMembersSessionsForRotation(ctx context.Context, groupID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		update sessions set force_rotate=true
+		where revoked_at is null and rotated_to is null
+		  and user_id in (select user_id from group_members where group_id=$1)`, groupID)
+	if err != nil {
+		return fmt.Errorf("mark group member sessions for rotation: %w", err)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -192,4 +193,63 @@ func TestSessionRevokedIsInvalid(t *testing.T) {
 	if _, _, err := m.Resolve(ctx, raw); err == nil {
 		t.Fatal("expected revoked session to be invalid")
 	}
+}
+
+func TestSessionForceRotateKeepsAbsoluteExpiry(t *testing.T) {
+	ctx := context.Background()
+	fs := newFakeStore()
+	now := time.Now().UTC()
+	m := NewManager(fs, 30*time.Minute, 8*time.Hour, 15*time.Minute, 10*time.Second)
+	m.now = func() time.Time { return now }
+
+	raw, sess, err := m.Create(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	marked := fs.sessions[key(sess.IDHash)]
+	marked.ForceRotate = true
+	fs.sessions[key(sess.IDHash)] = marked
+
+	next, newRaw, err := m.Resolve(ctx, raw)
+	if err != nil || newRaw == "" || newRaw == raw {
+		t.Fatalf("Resolve = %q, %v; want forced rotation", newRaw, err)
+	}
+	if !next.AbsoluteExpiresAt.Equal(sess.AbsoluteExpiresAt) {
+		t.Fatal("rotation must not extend absolute expiration")
+	}
+	if next.ForceRotate {
+		t.Fatal("rotated session must not be marked for rotation")
+	}
+	if _, again, err := m.Resolve(ctx, newRaw); err != nil || again != "" {
+		t.Fatalf("Resolve new identifier = %q, %v; want no further rotation", again, err)
+	}
+}
+
+func TestCookieTTLMatchesAbsoluteLifetime(t *testing.T) {
+	m := NewManager(newFakeStore(), 30*time.Minute, 8*time.Hour, 15*time.Minute, 10*time.Second)
+	if got := m.CookieTTL(); got != 8*time.Hour {
+		t.Fatalf("CookieTTL = %v; want the absolute lifetime", got)
+	}
+}
+
+func TestHashPasswordIsSaltedAndNeverPlaintext(t *testing.T) {
+	a, err := HashPassword("password123")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	b, _ := HashPassword("password123")
+	if a == b {
+		t.Fatal("identical passwords must hash differently (per-hash salt)")
+	}
+	if strings.Contains(a, "password123") {
+		t.Fatal("hash contains the plaintext password")
+	}
+	if ok, _ := VerifyPassword(a, "Password123"); ok {
+		t.Fatal("verification must be case sensitive")
+	}
+}
+
+func TestPerformDummyVerifyDoesNotPanic(t *testing.T) {
+	PerformDummyVerify("whatever")
+	PerformDummyVerify("")
 }

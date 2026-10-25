@@ -137,4 +137,5 @@ type Session struct {
 	RotatedTo         []byte
 	GraceExpiresAt    *time.Time
 	RevokedAt         *time.Time
+	ForceRotate       bool
 }
