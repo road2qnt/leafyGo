@@ -42,29 +42,45 @@
   {{end}}
   {{$page := .}}
   {{/* Paginasi */}}
-  <nav class="pagination" aria-label="Data pages">
-    {{if gt .Page 1}}
-    <a class="btn btn--sm" href="?schema={{.Schema}}&amp;table={{.Table}}&amp;page={{sub .Page 1}}&amp;limit={{.PageSize}}" rel="prev">{{template "icon" "chevron-left"}}Previous</a>
-    {{else}}
-    <span class="btn btn--sm" aria-disabled="true">{{template "icon" "chevron-left"}}Previous</span>
-    {{end}}
-    <ul class="pagination__pages" role="list">
-      {{range pageLinks .Page .PageSize .HasNext .RowCount}}
-      {{if .Gap}}
-      <li><span class="pagination__gap" aria-hidden="true">…</span></li>
-      {{else if .Current}}
-      <li><span class="pagination__page" aria-current="page"><span class="visually-hidden">Page </span>{{.Number}}</span></li>
+  <div class="table-pagination">
+    <div class="table-pagination__left">
+      <div class="table-pagination__length">
+        <label for="data-page-size">Show</label>
+        <select id="data-page-size" class="select select--sm table-pagination__select" onchange="location.href='?schema={{$page.Schema}}&amp;table={{$page.Table}}&amp;page=1&amp;limit=' + this.value">
+          <option value="10"{{if eq .PageSize 10}} selected{{end}}>10</option>
+          <option value="20"{{if eq .PageSize 20}} selected{{end}}>20</option>
+          <option value="25"{{if eq .PageSize 25}} selected{{end}}>25</option>
+          <option value="50"{{if eq .PageSize 50}} selected{{end}}>50</option>
+          <option value="100"{{if eq .PageSize 100}} selected{{end}}>100</option>
+        </select>
+        <span>rows per page</span>
+      </div>
+      <div class="table-pagination__info">Page {{.Page}}</div>
+    </div>
+    <nav class="pagination-nav" aria-label="Data pages">
+      {{if gt .Page 1}}
+      <a class="btn btn--sm" href="?schema={{.Schema}}&amp;table={{.Table}}&amp;page={{sub .Page 1}}&amp;limit={{.PageSize}}" rel="prev">{{template "icon" "chevron-left"}}Previous</a>
       {{else}}
-      <li><a class="pagination__page" href="?schema={{$page.Schema}}&amp;table={{$page.Table}}&amp;page={{.Number}}&amp;limit={{$page.PageSize}}"><span class="visually-hidden">Page </span>{{.Number}}</a></li>
+      <span class="btn btn--sm" aria-disabled="true">{{template "icon" "chevron-left"}}Previous</span>
       {{end}}
+      <ul class="pagination__pages" role="list">
+        {{range pageLinks .Page .PageSize .HasNext .RowCount}}
+        {{if .Gap}}
+        <li><span class="pagination__gap" aria-hidden="true">…</span></li>
+        {{else if .Current}}
+        <li><span class="pagination__page" aria-current="page"><span class="visually-hidden">Page </span>{{.Number}}</span></li>
+        {{else}}
+        <li><a class="pagination__page" href="?schema={{$page.Schema}}&amp;table={{$page.Table}}&amp;page={{.Number}}&amp;limit={{$page.PageSize}}"><span class="visually-hidden">Page </span>{{.Number}}</a></li>
+        {{end}}
+        {{end}}
+      </ul>
+      {{if .HasNext}}
+      <a class="btn btn--sm" href="?schema={{.Schema}}&amp;table={{.Table}}&amp;page={{add .Page 1}}&amp;limit={{.PageSize}}" rel="next">Next{{template "icon" "chevron-right"}}</a>
+      {{else}}
+      <span class="btn btn--sm" aria-disabled="true">Next{{template "icon" "chevron-right"}}</span>
       {{end}}
-    </ul>
-    {{if .HasNext}}
-    <a class="btn btn--sm" href="?schema={{.Schema}}&amp;table={{.Table}}&amp;page={{add .Page 1}}&amp;limit={{.PageSize}}" rel="next">Next{{template "icon" "chevron-right"}}</a>
-    {{else}}
-    <span class="btn btn--sm" aria-disabled="true">Next{{template "icon" "chevron-right"}}</span>
-    {{end}}
-  </nav>
+    </nav>
+  </div>
   {{/* Tautan lanjutan */}}
   <p><a href="/databases/{{$root.DB.ID}}/data">Choose another table</a> · <a href="/databases/{{$root.DB.ID}}/schema?schema={{.Schema}}&amp;table={{.Table}}">View structure</a></p>
 </div>
@@ -72,7 +88,7 @@
 {{/* Pilih tabel (belum ada yang dipilih) */}}
 <section aria-labelledby="pick-caption">
   {{if .Tables}}
-  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="pick-caption">
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="pick-caption" data-table-pagination="10">
     <table class="table">
       <caption id="pick-caption">Choose a table to browse. Data is read only.</caption>
       <thead><tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Rows</th></tr></thead>

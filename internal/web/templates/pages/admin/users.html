@@ -13,7 +13,7 @@
   {{/* Daftar user */}}
   <section aria-labelledby="users-caption">
     {{if .Users}}
-    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="users-caption">
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="users-caption" data-table-pagination="10">
       <table class="table">
         <caption id="users-caption">{{count .UserCount "user" "users"}}, {{count .AdminCount "admin" "admins"}}</caption>
         <thead>
@@ -33,7 +33,7 @@
               <span class="cell-meta">{{if .IsPlatformAdmin}}Platform Admin{{else}}User{{end}} · created <time datetime="{{isoTime .CreatedAt}}">{{formatTime .CreatedAt}}</time></span>
             </th>
             <td>{{if .IsActive}}Active{{else}}<span class="muted">Inactive</span>{{end}}</td>
-            <td>{{if .IsPlatformAdmin}}<span class="muted">Not applicable</span>{{else if .Groups}}{{range $i, $g := .Groups}}{{if $i}}, {{end}}<a href="/admin/groups/{{$g.ID}}">{{$g.Name}}</a>{{end}}{{else}}<span class="muted">None</span>{{end}}</td>
+            <td class="cell-truncate" title="{{range $i, $g := .Groups}}{{if $i}}, {{end}}{{$g.Name}}{{end}}">{{if .IsPlatformAdmin}}<span class="muted">Not applicable</span>{{else if .Groups}}{{range $i, $g := .Groups}}{{if $i}}, {{end}}<a href="/admin/groups/{{$g.ID}}">{{$g.Name}}</a>{{end}}{{else}}<span class="muted">None</span>{{end}}</td>
             <td class="actions"><a class="btn btn--sm" href="/admin/users?edit={{.ID}}#user-form"{{if $editing}} aria-current="true"{{end}}>Manage<span class="visually-hidden"> {{.Username}}</span></a></td>
           </tr>
           {{end}}

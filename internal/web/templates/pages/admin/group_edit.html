@@ -39,19 +39,43 @@
       <h2 id="members-title" class="section-title">Members</h2>
       <p class="field__hint">Adding or removing a member signs that user out so their new access applies right away.</p>
       {{if $g.Members}}
-      <ul class="chip-list" role="list">
-        {{range $g.Members}}
-        <li class="chip">
-          <span>{{.Username}}</span>
-          <form class="inline" method="post" action="/admin/groups/{{$g.ID}}/members">
-            <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
-            <input type="hidden" name="action" value="remove">
-            <input type="hidden" name="user_id" value="{{.ID}}">
-            <button class="chip__remove" type="submit" aria-label="Remove {{.Username}} from {{$g.Name}}">×</button>
-          </form>
-        </li>
-        {{end}}
-      </ul>
+      <div class="combobox stack-sm" data-combobox data-filter-table="members-table-wrap" id="member-filter-combobox">
+        <label class="field__label" for="member-filter-input">Find member</label>
+        <div class="combobox__control">
+          <input type="text" class="input combobox__input" id="member-filter-input" placeholder="Type to filter members..." autocomplete="off" aria-autocomplete="list" aria-expanded="false">
+          <button type="button" class="combobox__clear" aria-label="Clear member filter" hidden>×</button>
+        </div>
+        <ul class="combobox__dropdown" role="listbox" id="member-filter-listbox" hidden>
+          {{range $g.Members}}
+          <li class="combobox__option" role="option" data-value="{{.Username}}">{{.Username}}</li>
+          {{end}}
+        </ul>
+      </div>
+      <div class="table-wrap" id="members-table-wrap" tabindex="0" role="region" aria-labelledby="members-title" data-table-pagination="5">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Username</th>
+              <th scope="col" class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range $g.Members}}
+            <tr>
+              <th scope="row">{{.Username}}</th>
+              <td class="actions">
+                <form class="inline" method="post" action="/admin/groups/{{$g.ID}}/members">
+                  <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+                  <input type="hidden" name="action" value="remove">
+                  <input type="hidden" name="user_id" value="{{.ID}}">
+                  <button class="btn btn--sm btn--danger" type="submit" aria-label="Remove {{.Username}} from {{$g.Name}}">Remove</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
       {{else}}
       <p class="muted">No members yet.</p>
       {{end}}
@@ -61,11 +85,19 @@
         <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
         <input type="hidden" name="action" value="add">
         <div class="field">
-          <label class="field__label" for="add-member">Add member</label>
-          <select class="select" id="add-member" name="user_id" aria-describedby="add-member-hint" required>
-            <option value="">Choose a user</option>
-            {{range $view.Users}}<option value="{{.ID}}">{{.Username}}</option>{{end}}
-          </select>
+          <label class="field__label" for="add-member-input">Add member</label>
+          <div class="combobox" data-combobox id="add-member-combobox">
+            <input type="hidden" name="user_id" id="add-member-value" required>
+            <div class="combobox__control">
+              <input type="text" class="input combobox__input" id="add-member-input" placeholder="Search or select user..." autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-describedby="add-member-hint" required>
+              <button type="button" class="combobox__clear" aria-label="Clear selected user" hidden>×</button>
+            </div>
+            <ul class="combobox__dropdown" role="listbox" id="add-member-listbox" hidden>
+              {{range $view.Users}}
+              <li class="combobox__option" role="option" data-value="{{.ID}}">{{.Username}}</li>
+              {{end}}
+            </ul>
+          </div>
         </div>
         <button class="btn" type="submit">Add member</button>
       </form>
@@ -81,7 +113,7 @@
     <h2 id="access-title" class="section-title">Database access</h2>
     <p class="field__hint">Changing access signs out the group's members so their new access applies right away.</p>
     {{if $g.Access}}
-    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="access-title">
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="access-title" data-table-pagination="5">
       <table class="table">
         <thead>
           <tr><th scope="col">Database</th><th scope="col" class="shrink">Level</th><th scope="col">Actions</th></tr>

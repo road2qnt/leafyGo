@@ -15,7 +15,7 @@
 {{/* Daftar koneksi */}}
 <section aria-labelledby="conn-caption">
   {{if .Databases}}
-  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="conn-caption">
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="conn-caption" data-table-pagination="10">
     <table class="table">
       <caption id="conn-caption">{{count (len .Databases) "connection" "connections"}}</caption>
       <thead>

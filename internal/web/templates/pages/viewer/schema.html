@@ -92,7 +92,7 @@
 {{/* Daftar semua tabel dan view */}}
 <section aria-labelledby="tables-caption">
   {{if .Tables}}
-  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="tables-caption">
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="tables-caption" data-table-pagination="10">
     <table class="table">
       <caption id="tables-caption">{{count (len .Tables) "table or view" "tables and views"}}</caption>
       <thead>
