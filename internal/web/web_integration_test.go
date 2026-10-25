@@ -211,11 +211,11 @@ func TestViewOnlyCannotReachEditRoutes(t *testing.T) {
 	sid, csrf := login(t, srv, "budi", "password123")
 	base := "/databases/" + conn.ID.String()
 
-	// Target palsu: overview tetap 200, schema dan data 502.
+	// Target palsu: semua halaman tetap 200 dan schema/data menampilkan banner galat.
 	for path, want := range map[string]int{
 		base + "/":           http.StatusOK,
-		base + "/schema":     http.StatusBadGateway,
-		base + "/data":       http.StatusBadGateway,
+		base + "/schema":     http.StatusOK,
+		base + "/data":       http.StatusOK,
 		base + "/migrations": http.StatusOK,
 	} {
 		if rec := getWithSession(t, srv, path, sid); rec.Code != want {

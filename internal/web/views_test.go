@@ -405,7 +405,7 @@ func TestConnectionFormRoutes(t *testing.T) {
 func TestDataCellsDistinguishNullEmptyAndTruncated(t *testing.T) {
 	long := strings.Repeat("é", 250)
 	page := &dataPage{
-		Schema: "public", Table: "t", Columns: []string{"a", "b", "c", "d"},
+		Schema: "public", Table: "t", Columns: []dataColumn{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}},
 		Rows: [][]dataCell{{{IsNull: true}, {Text: "NULL"}, {Text: ""}, {Text: long}}},
 		Page: 1, PageSize: 50,
 	}
@@ -488,25 +488,27 @@ func TestRenderUnknownPage(t *testing.T) {
 }
 
 func TestPageLinks(t *testing.T) {
-	est := func(n int64) *int64 { return &n }
+	total := func(n int64) *int64 { return &n }
 	cases := []struct {
 		page, size int
 		hasNext    bool
-		est        *int64
+		total      *int64
 		want       string
 	}{
 		{1, 50, false, nil, "[1]"},
 		{1, 50, true, nil, "[1] 2"},
-		{1, 50, true, est(1000), "[1] 2 3 … 20"},
-		{3, 50, true, est(1000), "1 2 [3] 4 5 … 20"},
-		{10, 50, true, est(1000), "1 … 8 9 [10] 11 12 … 20"},
-		{20, 50, false, est(1000), "1 … 18 19 [20]"},
-		{4, 50, true, est(10), "1 2 3 [4] 5"},
-		{1, 0, true, est(1000), "[1] 2"},
+		{1, 50, true, total(1000), "[1] 2 3 … 20"},
+		{3, 50, true, total(1000), "1 2 [3] 4 5 … 20"},
+		{10, 50, true, total(1000), "1 … 8 9 [10] 11 12 … 20"},
+		{20, 50, false, total(1000), "1 … 18 19 [20]"},
+		{1, 50, false, total(0), "[1]"},
+		{1, 50, false, total(50), "[1]"},
+		{1, 50, true, total(51), "[1] 2"},
+		{4, 50, false, total(10), "1 2 3 [4]"},
 	}
 	for _, c := range cases {
 		var parts []string
-		for _, l := range pageLinks(c.page, c.size, c.hasNext, c.est) {
+		for _, l := range pageLinks(c.page, c.size, c.hasNext, c.total) {
 			switch {
 			case l.Gap:
 				parts = append(parts, "…")

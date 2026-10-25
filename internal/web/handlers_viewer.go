@@ -11,9 +11,14 @@ import (
 	"leafygo/internal/target"
 )
 
-func dbPageData(r *http.Request, title, nav string, data any) pageData {
+func (s *Server) dbPageData(r *http.Request, title, nav string, data any) pageData {
 	db := currentDB(r)
-	return pageData{Title: title + " · " + db.Name, Nav: nav, DB: db, Level: currentLevel(r), Data: data}
+	return pageData{Title: title + " · " + db.Name, Nav: nav, DB: db, Level: currentLevel(r), TargetDown: !s.targetReachable(r), Data: data}
+}
+
+func (s *Server) targetReachable(r *http.Request) bool {
+	pool, err := s.targetPool(r)
+	return err == nil && pool.Ping(r.Context()) == nil
 }
 
 func targetErrorText(err error) string {
@@ -24,13 +29,12 @@ func (s *Server) targetPool(r *http.Request) (*pgxpool.Pool, error) {
 	return s.targets.Pool(r.Context(), *currentDB(r))
 }
 
-func (s *Server) renderTargetError(w http.ResponseWriter, r *http.Request, err error) {
+func (s *Server) logTargetError(r *http.Request, err error) {
 	s.logger.Warn("target query failed", "db_id", currentDB(r).ID.String(), "error", target.ErrorText(err))
-	s.renderError(w, r, http.StatusBadGateway, targetErrorText(err))
 }
 
 func toTableInfo(t introspect.Table) tableInfo {
-	return tableInfo{Schema: t.Schema, Name: t.Name, Kind: t.Kind, EstimatedRows: t.EstimatedRows, CanSelect: t.CanSelect}
+	return tableInfo{Schema: t.Schema, Name: t.Name, Kind: t.Kind, RowCount: t.RowCount, CanSelect: t.CanSelect}
 }
 
 func (s *Server) listTables(r *http.Request) ([]tableInfo, error) {
@@ -53,6 +57,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	db := currentDB(r)
 	v := overviewView{DB: toDBView(*db)}
 	if tables, err := s.listTables(r); err != nil {
+		s.logTargetError(r, err)
 		v.TargetError = targetErrorText(err)
 	} else {
 		v.TableCount = len(tables)
@@ -66,7 +71,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		row := toHistoryRow(latest[0])
 		v.LatestMigration = &row
 	}
-	s.render(w, r, http.StatusOK, "viewer/overview.html", dbPageData(r, "Overview", navDBOverview, v))
+	s.render(w, r, http.StatusOK, "viewer/overview.html", s.dbPageData(r, "Overview", navDBOverview, v))
 }
 
 func toTableDetail(d introspect.TableDetail) *tableDetail {
@@ -89,15 +94,15 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 	if schema == "" || table == "" {
 		tables, err := s.listTables(r)
 		if err != nil {
-			s.renderTargetError(w, r, err)
+			s.renderSchemaDown(w, r, err)
 			return
 		}
-		s.render(w, r, http.StatusOK, "viewer/schema.html", dbPageData(r, "Schema", navDBSchema, schemaView{Tables: tables}))
+		s.render(w, r, http.StatusOK, "viewer/schema.html", s.dbPageData(r, "Schema", navDBSchema, schemaView{Tables: tables}))
 		return
 	}
 	pool, err := s.targetPool(r)
 	if err != nil {
-		s.renderTargetError(w, r, err)
+		s.renderSchemaDown(w, r, err)
 		return
 	}
 	d, err := introspect.Describe(r.Context(), pool, schema, table)
@@ -106,10 +111,20 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.renderTargetError(w, r, err)
+		s.renderSchemaDown(w, r, err)
 		return
 	}
-	s.render(w, r, http.StatusOK, "viewer/schema.html", dbPageData(r, "Schema", navDBSchema, schemaView{Detail: toTableDetail(d)}))
+	s.render(w, r, http.StatusOK, "viewer/schema.html", s.dbPageData(r, "Schema", navDBSchema, schemaView{Detail: toTableDetail(d)}))
+}
+
+func (s *Server) renderSchemaDown(w http.ResponseWriter, r *http.Request, err error) {
+	s.logTargetError(r, err)
+	s.render(w, r, http.StatusOK, "viewer/schema.html", s.dbPageData(r, "Schema", navDBSchema, schemaView{TargetError: targetErrorText(err)}))
+}
+
+func (s *Server) renderDataDown(w http.ResponseWriter, r *http.Request, err error) {
+	s.logTargetError(r, err)
+	s.render(w, r, http.StatusOK, "viewer/data.html", s.dbPageData(r, "Data", navDBData, dataView{TargetError: targetErrorText(err)}))
 }
 
 func queryInt(r *http.Request, key string, fallback int) int {
@@ -126,10 +141,10 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	renderPick := func(notice string) {
 		tables, err := s.listTables(r)
 		if err != nil {
-			s.renderTargetError(w, r, err)
+			s.renderDataDown(w, r, err)
 			return
 		}
-		s.render(w, r, http.StatusOK, "viewer/data.html", dbPageData(r, "Data", navDBData, dataView{Tables: tables, Notice: notice}))
+		s.render(w, r, http.StatusOK, "viewer/data.html", s.dbPageData(r, "Data", navDBData, dataView{Tables: tables, Notice: notice}))
 	}
 	if schema == "" || table == "" {
 		renderPick("")
@@ -138,7 +153,7 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 
 	pool, err := s.targetPool(r)
 	if err != nil {
-		s.renderTargetError(w, r, err)
+		s.renderDataDown(w, r, err)
 		return
 	}
 	d, err := introspect.Describe(r.Context(), pool, schema, table)
@@ -147,7 +162,7 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.renderTargetError(w, r, err)
+		s.renderDataDown(w, r, err)
 		return
 	}
 	if !d.CanSelect {
@@ -159,12 +174,16 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	size := min(queryInt(r, "limit", s.cfg.ViewerPageSize), s.cfg.ViewerMaxPageSize)
 	p, err := introspect.ReadPage(r.Context(), pool, d, page, size)
 	if err != nil {
-		s.renderTargetError(w, r, err)
+		s.renderDataDown(w, r, err)
 		return
 	}
+	columns := make([]dataColumn, len(p.Columns))
+	for i, c := range p.Columns {
+		columns[i] = dataColumn(c)
+	}
 	dp := &dataPage{
-		Schema: schema, Table: table, Columns: p.Columns, Page: page, PageSize: size,
-		HasNext: p.HasNext, EstimatedRows: d.EstimatedRows,
+		Schema: schema, Table: table, Columns: columns, Page: page, PageSize: size,
+		HasNext: p.HasNext, RowCount: d.RowCount,
 	}
 	for _, row := range p.Rows {
 		cells := make([]dataCell, len(row))
@@ -176,7 +195,7 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	if !p.Ordered {
 		dp.OrderNote = "This " + relkindNoun(d.Kind) + " has no primary key, so row order across pages is not guaranteed to be stable."
 	}
-	s.render(w, r, http.StatusOK, "viewer/data.html", dbPageData(r, "Data", navDBData, dataView{Page: dp}))
+	s.render(w, r, http.StatusOK, "viewer/data.html", s.dbPageData(r, "Data", navDBData, dataView{Page: dp}))
 }
 
 func relkindNoun(kind string) string {

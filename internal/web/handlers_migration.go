@@ -70,7 +70,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		v.DraftCount = len(drafts)
 	}
-	s.render(w, r, http.StatusOK, "migration/history.html", dbPageData(r, "Migration", navDBMigrations, v))
+	s.render(w, r, http.StatusOK, "migration/history.html", s.dbPageData(r, "Migration", navDBMigrations, v))
 }
 
 func (s *Server) handleDrafts(w http.ResponseWriter, r *http.Request) {
@@ -83,11 +83,11 @@ func (s *Server) handleDrafts(w http.ResponseWriter, r *http.Request) {
 	for _, d := range drafts {
 		v.Drafts = append(v.Drafts, toDraftRow(d))
 	}
-	s.render(w, r, http.StatusOK, "migration/drafts.html", dbPageData(r, "Drafts", navDBDrafts, v))
+	s.render(w, r, http.StatusOK, "migration/drafts.html", s.dbPageData(r, "Drafts", navDBDrafts, v))
 }
 
 func (s *Server) handleDraftNew(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "migration/draft_new.html", dbPageData(r, "New draft", navDBDrafts, draftNewView{}))
+	s.render(w, r, http.StatusOK, "migration/draft_new.html", s.dbPageData(r, "New draft", navDBDrafts, draftNewView{}))
 }
 
 type draftInput struct {
@@ -187,7 +187,7 @@ func explainFailure(err error, sql string) (*explainView, int) {
 }
 
 func (s *Server) renderDraftNew(w http.ResponseWriter, r *http.Request, status int, v draftNewView) {
-	s.render(w, r, status, "migration/draft_new.html", dbPageData(r, "New draft", navDBDrafts, v))
+	s.render(w, r, status, "migration/draft_new.html", s.dbPageData(r, "New draft", navDBDrafts, v))
 }
 
 func (s *Server) createDraft(r *http.Request, in draftInput) (domain.MigrationDraft, error) {
@@ -271,7 +271,7 @@ func (s *Server) loadDraft(w http.ResponseWriter, r *http.Request) (domain.Migra
 }
 
 func (s *Server) renderDraftEditor(w http.ResponseWriter, r *http.Request, status int, v draftEditorView) {
-	s.render(w, r, status, "migration/draft_editor.html", dbPageData(r, "Drafts", navDBDrafts, v))
+	s.render(w, r, status, "migration/draft_editor.html", s.dbPageData(r, "Drafts", navDBDrafts, v))
 }
 
 // Isi editor dengan input user dan token yang dia kirim.

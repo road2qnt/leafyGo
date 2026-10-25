@@ -428,6 +428,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 		"list":            func(v ...string) []string { return v },
 		"add":             func(a, b int) int { return a + b },
 		"sub":             func(a, b int) int { return a - b },
+		"rowsLabel":       rowsLabel,
 		"dash": func(v string) string {
 			if strings.TrimSpace(v) == "" {
 				return "—"
@@ -454,17 +455,18 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int,
 }
 
 type pageData struct {
-	Title    string
-	Nav      string
-	User     *domain.User
-	CSRF     string
-	Flash    *flashMessage
-	Message  string
-	Data     any
-	DB       *domain.DBConnection
-	Level    domain.AccessLevel
-	Preview  bool
-	NoHeader bool
+	Title      string
+	Nav        string
+	User       *domain.User
+	CSRF       string
+	Flash      *flashMessage
+	Message    string
+	Data       any
+	DB         *domain.DBConnection
+	Level      domain.AccessLevel
+	TargetDown bool
+	Preview    bool
+	NoHeader   bool
 }
 
 type flashMessage struct {

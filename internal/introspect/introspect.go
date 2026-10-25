@@ -19,11 +19,11 @@ var (
 const maxCellChars = 201
 
 type Table struct {
-	Schema        string
-	Name          string
-	Kind          string
-	EstimatedRows *int64
-	CanSelect     bool
+	Schema    string
+	Name      string
+	Kind      string
+	RowCount  *int64
+	CanSelect bool
 }
 
 type Column struct {
@@ -61,8 +61,13 @@ type Cell struct {
 	IsNull bool
 }
 
+type PageColumn struct {
+	Name    string
+	Numeric bool
+}
+
 type Page struct {
-	Columns []string
+	Columns []PageColumn
 	Rows    [][]Cell
 	HasNext bool
 	Ordered bool
@@ -78,7 +83,6 @@ const relationFilter = `
 
 const relationColumns = `
 	n.nspname, c.relname, c.relkind::text,
-	case when c.relkind in ('r','p','m','f') and c.reltuples >= 0 then c.reltuples::bigint end,
 	has_table_privilege(c.oid, 'SELECT')`
 
 func ListTables(ctx context.Context, pool *pgxpool.Pool) ([]Table, error) {
@@ -95,12 +99,44 @@ func ListTables(ctx context.Context, pool *pgxpool.Pool) ([]Table, error) {
 	var out []Table
 	for rows.Next() {
 		var t Table
-		if err := rows.Scan(&t.Schema, &t.Name, &t.Kind, &t.EstimatedRows, &t.CanSelect); err != nil {
+		if err := rows.Scan(&t.Schema, &t.Name, &t.Kind, &t.CanSelect); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].CanSelect {
+			out[i].RowCount = countRows(ctx, pool, out[i].Schema, out[i].Name)
+		}
+	}
+	return out, nil
+}
+
+// Nil bila hitungan gagal, misalnya foreign table yang tidak terjangkau.
+func countRows(ctx context.Context, pool *pgxpool.Pool, schema, name string) *int64 {
+	var n int64
+	err := pool.QueryRow(ctx, "select count(*) from "+pgx.Identifier{schema, name}.Sanitize()).Scan(&n)
+	if err != nil {
+		return nil
+	}
+	return &n
+}
+
+// IsNumeric melaporkan apakah hasil format_type berupa tipe numerik.
+func IsNumeric(dataType string) bool {
+	base := dataType
+	if i := strings.IndexByte(base, '('); i >= 0 {
+		base = base[:i]
+	}
+	switch strings.TrimSpace(base) {
+	case "smallint", "integer", "bigint", "numeric", "decimal", "real", "double precision", "money", "oid":
+		return true
+	}
+	return false
 }
 
 func Describe(ctx context.Context, pool *pgxpool.Pool, schema, name string) (TableDetail, error) {
@@ -110,12 +146,16 @@ func Describe(ctx context.Context, pool *pgxpool.Pool, schema, name string) (Tab
 		select c.oid, `+relationColumns+`
 		from pg_class c join pg_namespace n on n.oid=c.relnamespace
 		where `+relationFilter+` and n.nspname=$1 and c.relname=$2`, schema, name).
-		Scan(&oid, &d.Schema, &d.Name, &d.Kind, &d.EstimatedRows, &d.CanSelect)
+		Scan(&oid, &d.Schema, &d.Name, &d.Kind, &d.CanSelect)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TableDetail{}, ErrNotFound
 	}
 	if err != nil {
 		return TableDetail{}, err
+	}
+
+	if d.CanSelect {
+		d.RowCount = countRows(ctx, pool, d.Schema, d.Name)
 	}
 
 	rows, err := pool.Query(ctx, `
@@ -201,7 +241,7 @@ func ReadPage(ctx context.Context, pool *pgxpool.Pool, d TableDetail, page, page
 
 	selects := make([]string, len(d.Columns))
 	for i, c := range d.Columns {
-		out.Columns = append(out.Columns, c.Name)
+		out.Columns = append(out.Columns, PageColumn{Name: c.Name, Numeric: IsNumeric(c.DataType)})
 		selects[i] = fmt.Sprintf("left(%s::text, %d)", pgx.Identifier{c.Name}.Sanitize(), maxCellChars)
 	}
 	query := "select " + strings.Join(selects, ", ") + " from " + pgx.Identifier{d.Schema, d.Name}.Sanitize()

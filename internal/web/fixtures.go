@@ -162,20 +162,20 @@ const fxExplainPlan = `Index Scan using orders_status_ordered_idx on orders  (co
 
 func fxTables() []tableInfo {
 	return []tableInfo{
-		{Schema: "analytics", Name: "daily_sales", Kind: "r", EstimatedRows: fxInt64(42), CanSelect: true},
-		{Schema: "public", Name: "categories", Kind: "r", EstimatedRows: fxInt64(5), CanSelect: true},
-		{Schema: "public", Name: "customers", Kind: "r", EstimatedRows: fxInt64(40), CanSelect: true},
-		{Schema: "public", Name: "order_items", Kind: "r", EstimatedRows: fxInt64(390), CanSelect: true},
+		{Schema: "analytics", Name: "daily_sales", Kind: "r", RowCount: fxInt64(42), CanSelect: true},
+		{Schema: "public", Name: "categories", Kind: "r", RowCount: fxInt64(5), CanSelect: true},
+		{Schema: "public", Name: "customers", Kind: "r", RowCount: fxInt64(40), CanSelect: true},
+		{Schema: "public", Name: "order_items", Kind: "r", RowCount: fxInt64(390), CanSelect: true},
 		{Schema: "public", Name: "order_totals", Kind: "v", CanSelect: true},
-		{Schema: "public", Name: "orders", Kind: "r", EstimatedRows: fxInt64(1200), CanSelect: true},
-		{Schema: "public", Name: "products", Kind: "r", EstimatedRows: fxInt64(120), CanSelect: true},
-		{Schema: "public", Name: "supplier_contracts", Kind: "r", EstimatedRows: fxInt64(12), CanSelect: false},
+		{Schema: "public", Name: "orders", Kind: "r", RowCount: fxInt64(1200), CanSelect: true},
+		{Schema: "public", Name: "products", Kind: "r", RowCount: fxInt64(120), CanSelect: true},
+		{Schema: "public", Name: "supplier_contracts", Kind: "r", RowCount: fxInt64(12), CanSelect: false},
 	}
 }
 
 func fxOrdersDetail() tableDetail {
 	return tableDetail{
-		tableInfo:  tableInfo{Schema: "public", Name: "orders", Kind: "r", EstimatedRows: fxInt64(1200), CanSelect: true},
+		tableInfo:  tableInfo{Schema: "public", Name: "orders", Kind: "r", RowCount: fxInt64(1200), CanSelect: true},
 		PrimaryKey: []string{"id"},
 		Columns: []columnInfo{
 			{Name: "id", DataType: "integer", Default: "nextval('orders_id_seq'::regclass)", IsPK: true, Ordinal: 1},
@@ -240,13 +240,23 @@ func fxProductsPage(page int) *dataPage {
 	}
 	return &dataPage{
 		Schema: "public", Table: "products",
-		Columns:       []string{"id", "sku", "name", "category_id", "price", "stock", "is_active", "attrs", "note"},
-		Rows:          rows,
-		Page:          page,
-		PageSize:      pageSize,
-		HasNext:       page*pageSize < 120,
-		EstimatedRows: fxInt64(120),
+		Columns:  fxColumns("id:n", "sku", "name", "category_id:n", "price:n", "stock:n", "is_active", "attrs", "note"),
+		Rows:     rows,
+		Page:     page,
+		PageSize: pageSize,
+		HasNext:  page*pageSize < 120,
+		RowCount: fxInt64(120),
 	}
+}
+
+// Akhiran ":n" menandai kolom numerik.
+func fxColumns(specs ...string) []dataColumn {
+	out := make([]dataColumn, len(specs))
+	for i, sp := range specs {
+		name, numeric := strings.CutSuffix(sp, ":n")
+		out[i] = dataColumn{Name: name, Numeric: numeric}
+	}
+	return out
 }
 
 type previewPage struct {
@@ -265,6 +275,11 @@ type previewGroup struct {
 func dbPage(title, nav string, conn domain.DBConnection, user domain.User, level domain.AccessLevel, data any) pageData {
 	c, u := conn, user
 	return pageData{Title: title + " · " + c.Name, Nav: nav, DB: &c, Level: level, User: &u, Data: data}
+}
+
+func downPage(p pageData) pageData {
+	p.TargetDown = true
+	return p
 }
 
 func adminPage(title, nav string, data any) pageData {
@@ -399,7 +414,13 @@ func previewGroups() []previewGroup {
 				return dbPage("Overview", navDBOverview, fxToko, fxBudi, domain.LevelEdit, overviewView{DB: fxDBView(fxToko), TableCount: 8, LatestMigration: &history[0]})
 			}},
 			{"viewer-overview-failed", "Overview, target unreachable", "viewer/overview.html", func() pageData {
-				return dbPage("Overview", navDBOverview, fxArsip, fxAndi, domain.LevelView, overviewView{DB: fxDBView(fxArsip), TargetError: fxTargetError})
+				return downPage(dbPage("Overview", navDBOverview, fxArsip, fxAndi, domain.LevelView, overviewView{DB: fxDBView(fxArsip), TargetError: fxTargetError}))
+			}},
+			{"viewer-schema-failed", "Schema, target unreachable", "viewer/schema.html", func() pageData {
+				return downPage(dbPage("Schema", navDBSchema, fxArsip, fxAndi, domain.LevelView, schemaView{TargetError: fxTargetError}))
+			}},
+			{"viewer-data-failed", "Data, target unreachable", "viewer/data.html", func() pageData {
+				return downPage(dbPage("Data", navDBData, fxArsip, fxAndi, domain.LevelView, dataView{TargetError: fxTargetError}))
 			}},
 			{"viewer-schema", "Schema, table list", "viewer/schema.html", func() pageData {
 				return dbPage("Schema", navDBSchema, fxToko, fxAndi, domain.LevelView, schemaView{Tables: fxTables()})
@@ -425,7 +446,7 @@ func previewGroups() []previewGroup {
 				return dbPage("Data", navDBData, fxToko, fxAndi, domain.LevelView, dataView{Page: fxProductsPage(3)})
 			}},
 			{"viewer-data-view", "Data, view without stable order", "viewer/data.html", func() pageData {
-				p := &dataPage{Schema: "public", Table: "order_totals", Columns: []string{"order_id", "customer", "status", "total"},
+				p := &dataPage{Schema: "public", Table: "order_totals", Columns: fxColumns("order_id:n", "customer", "status", "total:n"),
 					Rows: [][]dataCell{{{Text: "12"}, {Text: "Ayu Lestari"}, {Text: "paid"}, {Text: "48250.00"}}, {{Text: "13"}, {Text: "Bayu Wijaya"}, {Text: "shipped"}, {Text: "125000.00"}}},
 					Page: 1, PageSize: 50, OrderNote: "This view has no primary key, so row order across pages is not guaranteed to be stable."}
 				return dbPage("Data", navDBData, fxToko, fxAndi, domain.LevelView, dataView{Page: p})

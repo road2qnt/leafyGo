@@ -200,11 +200,11 @@ func connFormValues(d dbView) map[string]string {
 // Viewer. Mirror tipe introspect.
 
 type tableInfo struct {
-	Schema        string
-	Name          string
-	Kind          string // r, p, v, m, f
-	EstimatedRows *int64
-	CanSelect     bool
+	Schema    string
+	Name      string
+	Kind      string // r, p, v, m, f
+	RowCount  *int64
+	CanSelect bool
 }
 
 type tableDetail struct {
@@ -237,21 +237,26 @@ type indexInfo struct {
 	Definition string
 }
 
+type dataColumn struct {
+	Name    string
+	Numeric bool
+}
+
 type dataCell struct {
 	Text   string
 	IsNull bool
 }
 
 type dataPage struct {
-	Schema        string
-	Table         string
-	Columns       []string
-	Rows          [][]dataCell
-	Page          int
-	PageSize      int
-	HasNext       bool
-	EstimatedRows *int64
-	OrderNote     string
+	Schema    string
+	Table     string
+	Columns   []dataColumn
+	Rows      [][]dataCell
+	Page      int
+	PageSize  int
+	HasNext   bool
+	RowCount  *int64
+	OrderNote string
 }
 
 // TargetError terisi bila target tidak terjangkau (halaman tetap 200).
@@ -264,15 +269,17 @@ type overviewView struct {
 
 // Detail nil berarti mode daftar tabel.
 type schemaView struct {
-	Tables []tableInfo
-	Detail *tableDetail
+	Tables      []tableInfo
+	Detail      *tableDetail
+	TargetError string
 }
 
 // Page nil = mode pilih tabel. Notice untuk pesan CanSelect=false.
 type dataView struct {
-	Tables []tableInfo
-	Page   *dataPage
-	Notice string
+	Tables      []tableInfo
+	Page        *dataPage
+	Notice      string
+	TargetError string
 }
 
 // Migration
@@ -489,6 +496,13 @@ func formatDuration(v any) string {
 	return fmt.Sprintf("%.1f s", float64(ms)/1000)
 }
 
+func rowsLabel(v any) string {
+	if n, ok := toInt64(v); ok && n == 1 {
+		return "1 row"
+	}
+	return formatInt(v) + " rows"
+}
+
 func formatInt(v any) string {
 	n, ok := toInt64(v)
 	if !ok {
@@ -539,16 +553,13 @@ type pageLink struct {
 	Gap     bool
 }
 
-// Halaman terakhir dari estimasi baris, bisa meleset.
-func pageLinks(page, pageSize int, hasNext bool, estimated *int64) []pageLink {
+// Halaman terakhir dari jumlah baris eksak. Tanpa jumlah, hanya satu halaman setelah yang ini.
+func pageLinks(page, pageSize int, hasNext bool, total *int64) []pageLink {
 	last := page
-	if hasNext {
+	if total != nil && pageSize > 0 {
+		last = max(page, int((*total+int64(pageSize)-1)/int64(pageSize)))
+	} else if hasNext {
 		last = page + 1
-		if estimated != nil && pageSize > 0 {
-			if est := int((*estimated + int64(pageSize) - 1) / int64(pageSize)); est > last {
-				last = est
-			}
-		}
 	}
 	var out []pageLink
 	gap := false
