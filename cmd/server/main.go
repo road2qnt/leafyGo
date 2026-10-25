@@ -56,6 +56,12 @@ func run() error {
 		return err
 	}
 
+	if n, err := st.MarkRunningMigrationsFailed(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		logger.Warn("marked interrupted migrations as failed", "count", n)
+	}
+
 	// Putra: demo seed.
 	go cleanupSessions(ctx, st, logger)
 
