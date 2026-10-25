@@ -176,7 +176,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			s.setSessionCookie(w, newRaw)
 		}
 		user, err := s.store.GetUserByID(r.Context(), sess.UserID)
-		if err != nil {
+		if err != nil || !user.IsActive {
 			s.clearSessionCookie(w)
 			s.redirectToLogin(w, r)
 			return

@@ -78,6 +78,11 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.reset(key)
+	if !user.IsActive {
+		s.setFlash(w, "error", "This account is inactive. Contact a Platform Admin.")
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 
 	if old, err := r.Cookie("sid"); err == nil && old.Value != "" {
 		// Cabut session lama anti fixation.
