@@ -62,7 +62,6 @@ func run() error {
 		logger.Warn("marked interrupted migrations as failed", "count", n)
 	}
 
-	// Putra: demo seed.
 	go cleanupSessions(ctx, st, logger)
 
 	srv := web.New(cfg, st, sessionManager, policy, logger)

@@ -30,7 +30,6 @@ services:
       APP_ENV: ${APP_ENV:-development}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
-    # Putra: SEED_DEMO + demo DB.
 
 volumes:
   pgdata:
