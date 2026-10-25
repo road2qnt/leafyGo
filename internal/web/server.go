@@ -22,22 +22,46 @@ import (
 	"leafygo/internal/auth"
 	"leafygo/internal/config"
 	"leafygo/internal/domain"
+	"leafygo/internal/migration"
+	"leafygo/internal/secret"
 	"leafygo/internal/store"
+	"leafygo/internal/target"
 )
 
 //go:embed templates/*.html templates/pages/*/*.html templates/partials/*.html static/*
 var assets embed.FS
 
 type Server struct {
-	cfg      config.Config
-	store    *store.Store
-	sessions *auth.Manager
-	policy   *access.Policy
-	logger   *slog.Logger
-	limiter  *loginLimiter
+	cfg        config.Config
+	store      *store.Store
+	sessions   *auth.Manager
+	policy     *access.Policy
+	logger     *slog.Logger
+	limiter    *loginLimiter
+	box        *secret.Box
+	targets    *target.Manager
+	migrations *migration.Service
 }
 
+// cfg.EncryptionKey sudah divalidasi config.Load.
 func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *access.Policy, logger *slog.Logger) *Server {
+	if cfg.ViewerPageSize <= 0 {
+		cfg.ViewerPageSize = 50
+	}
+	if cfg.ViewerMaxPageSize < cfg.ViewerPageSize {
+		cfg.ViewerMaxPageSize = max(cfg.ViewerPageSize, 100)
+	}
+	if cfg.MaxMigrationBytes <= 0 {
+		cfg.MaxMigrationBytes = 1 << 20
+	}
+	box, err := secret.New(cfg.EncryptionKey)
+	if err != nil {
+		panic(err)
+	}
+	targets := target.New(box, target.Options{
+		ConnectTimeout: cfg.TargetConnectTimeout,
+		ViewerTimeout:  cfg.ViewerStatementTimeout,
+	})
 	return &Server{
 		cfg:      cfg,
 		store:    st,
@@ -45,8 +69,17 @@ func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *acc
 		policy:   policy,
 		logger:   logger,
 		limiter:  newLoginLimiter(8, 5*time.Minute),
+		box:      box,
+		targets:  targets,
+		migrations: migration.NewService(st, targets, migration.Options{
+			AdvisoryLockTimeout: cfg.MigrationAdvisoryLockTimeout,
+			MigrationTimeout:    cfg.MigrationTimeout,
+			MaxMigrationBytes:   int(cfg.MaxMigrationBytes),
+		}),
 	}
 }
+
+func (s *Server) Close() { s.targets.Close() }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

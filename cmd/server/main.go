@@ -59,7 +59,9 @@ func run() error {
 	// Putra: demo seed.
 	go cleanupSessions(ctx, st, logger)
 
-	handler := web.New(cfg, st, sessionManager, policy, logger).Handler()
+	srv := web.New(cfg, st, sessionManager, policy, logger)
+	defer srv.Close()
+	handler := srv.Handler()
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,
