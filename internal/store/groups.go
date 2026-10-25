@@ -23,6 +23,21 @@ func (s *Store) CreateGroup(ctx context.Context, name, description string) (doma
 	return g, nil
 }
 
+func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name, description string) (domain.Group, error) {
+	var g domain.Group
+	err := s.pool.QueryRow(ctx, `
+		update groups set name=$2, description=$3 where id=$1
+		returning id, name, description, created_at`, id, name, description).
+		Scan(&g.ID, &g.Name, &g.Description, &g.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Group{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("update group: %w", mapWriteError(err))
+	}
+	return g, nil
+}
+
 func (s *Store) GetGroup(ctx context.Context, id uuid.UUID) (domain.Group, error) {
 	var g domain.Group
 	err := s.pool.QueryRow(ctx, `
