@@ -1,7 +1,10 @@
-.PHONY: run test test-integration vet
+.PHONY: run seed test test-integration vet
 
 run:
 	go run ./cmd/server
+
+seed:
+	go run ./cmd/seed
 
 test:
 	go test ./...
@@ -9,7 +12,7 @@ test:
 test-integration:
 	TEST_DATABASE_URL=$${TEST_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/leafygo_test?sslmode=disable} \
 	TEST_TARGET_DATABASE_URL=$${TEST_TARGET_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/leafygo_target_test?sslmode=disable} \
-	go test -p 1 ./...
+	go test -race -count=1 -p 1 ./...
 
 vet:
 	go vet ./...

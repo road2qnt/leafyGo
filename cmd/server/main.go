@@ -56,10 +56,17 @@ func run() error {
 		return err
 	}
 
-	// Putra: demo seed.
+	if n, err := st.MarkRunningMigrationsFailed(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		logger.Warn("marked interrupted migrations as failed", "count", n)
+	}
+
 	go cleanupSessions(ctx, st, logger)
 
-	handler := web.New(cfg, st, sessionManager, policy, logger).Handler()
+	srv := web.New(cfg, st, sessionManager, policy, logger)
+	defer srv.Close()
+	handler := srv.Handler()
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,

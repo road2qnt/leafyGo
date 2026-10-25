@@ -404,6 +404,42 @@ func TestRevokeGroupMembersSessionsExcept(t *testing.T) {
 	}
 }
 
+func TestMarkSessionsForRotation(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+	member := createUser(t, st, "member", false)
+	other := createUser(t, st, "other", false)
+	group, err := st.CreateGroup(ctx, "group", "")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := st.AddGroupMember(ctx, group.ID, member.ID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	hMember := createSession(t, st, member.ID)
+	hOther := createSession(t, st, other.ID)
+
+	if err := st.MarkGroupMembersSessionsForRotation(ctx, group.ID); err != nil {
+		t.Fatalf("mark group: %v", err)
+	}
+	sess, err := st.GetSession(ctx, hMember)
+	if err != nil || !sess.ForceRotate || sess.RevokedAt != nil {
+		t.Fatalf("member session = %+v, %v; want marked and active", sess, err)
+	}
+	sess, err = st.GetSession(ctx, hOther)
+	if err != nil || sess.ForceRotate {
+		t.Fatalf("other session = %+v, %v; want untouched", sess, err)
+	}
+
+	if err := st.MarkUserSessionsForRotation(ctx, other.ID); err != nil {
+		t.Fatalf("mark user: %v", err)
+	}
+	sess, err = st.GetSession(ctx, hOther)
+	if err != nil || !sess.ForceRotate {
+		t.Fatalf("other session = %+v, %v; want marked", sess, err)
+	}
+}
+
 func TestCreateGroupDuplicate(t *testing.T) {
 	st := testPool(t)
 	ctx := context.Background()

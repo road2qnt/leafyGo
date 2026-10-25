@@ -1,0 +1,96 @@
+{{define "content"}}
+{{$root := .}}
+{{with .Data}}
+{{$view := .}}
+{{/* Breadcrumb */}}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="/admin/databases">Connections</a></li>
+    <li><span aria-current="page">{{with .Editing}}{{.Name}}{{else}}New connection{{end}}</span></li>
+  </ol>
+</nav>
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    <h1>{{with .Editing}}Edit {{.Name}}{{else}}Add connection{{end}}</h1>
+    {{with .Editing}}<p class="page-header__meta muted text-sm">Updated <time datetime="{{isoTime .UpdatedAt}}">{{formatTime .UpdatedAt}}</time></p>{{end}}
+  </div>
+  {{with .Editing}}
+  {{/* Tombol test koneksi */}}
+  <div class="page-header__actions">
+    <form class="inline" method="post" action="/admin/databases/{{.ID}}/test">
+      <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+      <button class="btn" type="submit">Test connection</button>
+    </form>
+  </div>
+  {{end}}
+</div>
+
+<div class="stack--lg">
+  {{/* Form pengaturan koneksi */}}
+  <section class="card" aria-labelledby="conn-form-title">
+    <h2 id="conn-form-title" class="section-title">Connection settings</h2>
+    {{template "formError" .Form}}
+    <form class="form" method="post" action="/admin/databases{{with .Editing}}/{{.ID}}{{end}}" novalidate>
+      <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+      {{template "connFields" dict "prefix" "conn" "values" .Form.Values "errors" .Form.Errors "edit" .Editing}}
+      <div class="form__actions">
+        <button class="btn btn--primary" type="submit">{{if .Editing}}Save changes{{else}}Add connection{{end}}</button>
+        <a class="btn btn--ghost" href="/admin/databases">Cancel</a>
+      </div>
+    </form>
+  </section>
+
+  {{with .Editing}}
+  {{/* Hapus koneksi */}}
+  <section class="card card--danger" aria-labelledby="conn-delete-title">
+    <h2 id="conn-delete-title" class="section-title">Delete connection</h2>
+    <p>Connection <strong>{{.Name}}</strong> and its group access, drafts, and migration history will be removed from the platform. The database itself is untouched. Refused while a migration is running.</p>
+    <details class="disclosure disclosure--danger">
+      <summary>{{template "icon" "trash"}}Delete {{.Name}}</summary>
+      <form class="disclosure__body" method="post" action="/admin/databases/{{.ID}}/delete">
+        <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+        <p>This cannot be undone.</p>
+        <button class="btn btn--sm btn--danger" type="submit">Yes, delete connection</button>
+      </form>
+    </details>
+  </section>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{/* Arg: prefix, values, errors, edit. */}}
+{{define "connFields"}}
+{{$v := or .values (dict)}}
+{{$e := or .errors (dict)}}
+{{/* Nama dan host */}}
+<div class="form__row">
+  {{template "field" dict "id" (printf "%s-name" .prefix) "name" "name" "label" "Display name" "value" (index $v "name") "error" (index $e "name") "autocomplete" "off" "required" true}}
+  {{template "field" dict "id" (printf "%s-host" .prefix) "name" "host" "label" "Host" "value" (index $v "host") "error" (index $e "host") "autocomplete" "off" "required" true}}
+  {{template "field" dict "id" (printf "%s-port" .prefix) "name" "port" "label" "Port" "type" "number" "value" (or (index $v "port") "5432") "error" (index $e "port") "required" true}}
+</div>
+{{/* Database dan user */}}
+<div class="form__row">
+  {{template "field" dict "id" (printf "%s-dbname" .prefix) "name" "dbname" "label" "Database name" "value" (index $v "dbname") "error" (index $e "dbname") "autocomplete" "off" "required" true}}
+  {{template "field" dict "id" (printf "%s-username" .prefix) "name" "username" "label" "Database user" "value" (index $v "username") "error" (index $e "username") "autocomplete" "off" "required" true}}
+</div>
+{{/* Password dan SSL mode */}}
+<div class="form__row">
+{{if .edit}}
+{{template "field" dict "id" (printf "%s-password" .prefix) "name" "password" "label" "Database password" "type" "password" "error" (index $e "password") "hint" "Leave empty to keep the current password." "autocomplete" "new-password"}}
+{{else}}
+{{template "field" dict "id" (printf "%s-password" .prefix) "name" "password" "label" "Database password" "type" "password" "error" (index $e "password") "hint" "Stored encrypted. Re-enter it if the form fails to save." "autocomplete" "new-password" "required" true}}
+{{end}}
+{{$ssl := or (index $v "sslmode") "disable"}}
+<div class="field">
+  <label class="field__label" for="f-{{.prefix}}-sslmode">SSL mode</label>
+  <p class="field__hint" id="f-{{.prefix}}-sslmode-hint">Use require or stricter for hosts outside the server.</p>
+  <select class="select" id="f-{{.prefix}}-sslmode" name="sslmode" aria-describedby="f-{{.prefix}}-sslmode-hint">
+    {{range $mode := list "disable" "allow" "prefer" "require" "verify-ca" "verify-full"}}
+    <option value="{{$mode}}"{{if eq $mode $ssl}} selected{{end}}>{{$mode}}</option>
+    {{end}}
+  </select>
+</div>
+</div>
+{{end}}

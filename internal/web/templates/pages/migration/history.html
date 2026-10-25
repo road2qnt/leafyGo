@@ -1,0 +1,97 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeaderWith" dict "page" . "action" .Data.Items}}
+{{$root := .}}
+{{with .Data}}
+<div class="stack--lg">
+  {{/* Detail migrasi terpilih */}}
+  {{with .Selected}}
+  <div>
+    {{/* Breadcrumb */}}
+    <nav class="breadcrumb" aria-label="Migration location">
+      <ol>
+        <li><a href="/databases/{{$root.DB.ID}}/migrations">Migration history</a></li>
+        <li><span aria-current="page" class="mono">v{{.Version}}</span></li>
+      </ol>
+    </nav>
+    <div class="detail-header">
+      <h2 id="detail-title" class="detail-title mono">v{{.Version}}</h2>
+      <p class="detail-header__meta detail-title">{{template "statusBadge" .Status}}</p>
+    </div>
+  </div>
+  {{/* Panel detail migrasi */}}
+  <section class="panel" aria-labelledby="detail-title">
+    <div class="panel__body panel__body--lg stack--md">
+      {{if eq .Status "failed"}}
+      <div class="alert alert--error" role="alert">
+        <div>
+          <p class="alert__title">Migration failed</p>
+          <p class="mono">{{.Error}}</p>
+        </div>
+      </div>
+      {{else if eq .Status "success"}}
+      <div class="alert alert--success" role="note"><p>The transaction was committed.</p></div>
+      {{else if eq .Status "running"}}
+      <div class="alert alert--warning" role="status"><p>This migration is still running. Reload the page to see the result.</p></div>
+      {{end}}
+      {{/* Metadata eksekusi */}}
+      <dl class="meta-grid">
+        <div><dt>Executed by</dt><dd>{{or .ExecutedByName "-"}}</dd></div>
+        <div><dt>Started</dt><dd><time datetime="{{isoTime .StartedAt}}">{{formatTime .StartedAt}}</time></dd></div>
+        <div><dt>Finished</dt><dd>{{if .FinishedAt}}<time datetime="{{isoTime .FinishedAt}}">{{formatTime .FinishedAt}}</time>{{else}}-{{end}}</dd></div>
+        <div><dt>Duration</dt><dd>{{formatDuration .DurationMs}}</dd></div>
+      </dl>
+      {{template "codeView" dict "id" "sql" "label" "SQL" "text" .SQL}}
+    </div>
+  </section>
+  {{else}}
+  {{/* Info draft belum dieksekusi */}}
+  {{if and $root.Level.CanEdit $.Data.DraftCount}}
+  <div class="alert alert--info" role="note">
+    <p>{{$.Data.DraftCount}} draft{{if ne $.Data.DraftCount 1}}s{{end}} not executed yet. <a href="/databases/{{$root.DB.ID}}/migrations/drafts">View drafts</a></p>
+  </div>
+  {{end}}
+  {{end}}
+
+  {{/* Tabel riwayat migrasi */}}
+  <section aria-labelledby="history-caption">
+    {{if .Items}}
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="history-caption">
+      <table class="table">
+        <caption id="history-caption">Migration history</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="num">Version</th>
+            <th scope="col">Status</th>
+            <th scope="col">Executed by</th>
+            <th scope="col">Started</th>
+            <th scope="col" class="num">Duration</th>
+            <th scope="col">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Items}}
+          <tr{{if and $.Data.Selected (eq .ID.String $.Data.Selected.ID.String)}} class="is-selected" aria-current="true"{{end}}>
+            <th scope="row" class="num mono"><a href="/databases/{{$root.DB.ID}}/migrations?migration={{.ID}}">v{{.Version}}<span class="visually-hidden">, view details</span></a></th>
+            <td>{{template "statusText" .Status}}</td>
+            <td>{{or .ExecutedByName "-"}}</td>
+            <td class="nowrap"><time datetime="{{isoTime .StartedAt}}">{{formatTime .StartedAt}}</time></td>
+            <td class="num">{{formatDuration .DurationMs}}</td>
+            <td class="mono text-sm">{{if .Error}}{{truncate .Error 80}}{{else}}<span class="muted">-</span>{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    {{/* Kosong: belum ada migrasi */}}
+    <div class="empty-state">
+      <h2 class="empty-state__title" id="history-caption">No migrations yet</h2>
+      <p>Changes to this database will appear here in order.</p>
+      {{if $root.Level.CanEdit}}<p><a class="btn btn--primary" href="/databases/{{$root.DB.ID}}/migrations/new">{{template "icon" "plus"}}Create the first draft</a></p>{{end}}
+    </div>
+    {{end}}
+  </section>
+</div>
+{{end}}
+{{end}}

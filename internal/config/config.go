@@ -27,6 +27,7 @@ type Config struct {
 	AdminUsername string
 	AdminPassword string
 
+	UIPreview                    bool
 	TargetConnectTimeout         time.Duration
 	ViewerStatementTimeout       time.Duration
 	MigrationAdvisoryLockTimeout time.Duration
@@ -93,6 +94,13 @@ func Load() (Config, error) {
 	}
 	cfg.ViewerPageSize = int(viewerPageSize)
 	cfg.ViewerMaxPageSize = int(viewerMaxPageSize)
+
+	if cfg.UIPreview, err = boolEnv("UI_PREVIEW", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.UIPreview && cfg.AppEnv == "production" {
+		return Config{}, errors.New("UI_PREVIEW must not be enabled in production")
+	}
 
 	key, err := decodeKey(os.Getenv("ENCRYPTION_KEY"))
 	if err != nil {

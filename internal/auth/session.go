@@ -99,7 +99,7 @@ func (m *Manager) Resolve(ctx context.Context, raw string) (domain.Session, stri
 			return domain.Session{}, "", ErrSessionInvalid
 		}
 
-		if now.Sub(sess.CreatedAt) >= m.rotate {
+		if sess.ForceRotate || now.Sub(sess.CreatedAt) >= m.rotate {
 			newRaw, err := randomToken()
 			if err != nil {
 				return domain.Session{}, "", err

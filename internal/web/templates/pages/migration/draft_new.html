@@ -1,0 +1,19 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeaderWith" dict "page" . "action" false}}
+{{$root := .}}
+{{with .Data}}
+{{$base := printf "/databases/%s/migrations/drafts" $root.DB.ID}}
+{{/* Form draft baru */}}
+<section class="stack" aria-labelledby="new-title">
+  <h2 id="new-title">New migration draft</h2>
+  {{/* Error validasi */}}
+  {{template "formError" .Form}}
+  <form class="form" method="post" action="{{$base}}">
+    <input type="hidden" name="csrf_token" value="{{$root.CSRF}}">
+    {{template "draftFields" dict "title" .Title "sql" .SQL "errors" .Form.Errors "errorLine" .SQLErrorLine}}
+    {{template "draftActions" dict "base" $base "db" $root.DB.Name "cancel" $base "explain" .Explain}}
+  </form>
+</section>
+{{end}}
+{{end}}

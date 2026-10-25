@@ -1,0 +1,60 @@
+{{define "content"}}
+{{with .Data}}
+{{/* Judul halaman */}}
+<div class="page-header">
+  <div>
+    {{if .IsAdmin}}
+    <h1>Manage platform</h1>
+    {{else}}
+    <h1>Databases</h1>
+    {{end}}
+  </div>
+</div>
+<div class="stack--lg">
+  {{if .IsAdmin}}
+  {{/* Menu admin */}}
+  <section aria-labelledby="admin-title">
+    <h2 id="admin-title" class="visually-hidden">Admin menu</h2>
+    <ul class="grid" role="list">
+      <li class="card card--link">
+        <h3 class="card__title"><a class="card__link" href="/admin/users">Users</a></h3>
+        <p>Create accounts, reset passwords, and activate or deactivate users.</p>
+      </li>
+      <li class="card card--link">
+        <h3 class="card__title"><a class="card__link" href="/admin/groups">Groups and access</a></h3>
+        <p>Group users, then grant each group View Only or View + Edit per database.</p>
+      </li>
+      <li class="card card--link">
+        <h3 class="card__title"><a class="card__link" href="/admin/databases">Connections</a></h3>
+        <p>Register the PostgreSQL databases the platform manages and test their connections.</p>
+      </li>
+    </ul>
+  </section>
+  {{end}}
+
+  {{if .Databases}}
+  {{/* Daftar database yang bisa diakses */}}
+  <section aria-labelledby="db-list-title">
+    <h2 id="db-list-title" class="visually-hidden">Database list</h2>
+    <ul class="grid" role="list">
+      {{range .Databases}}
+      <li class="card card--link">
+        <h3 class="card__title"><a class="card__link" href="/databases/{{.ID}}">{{.Name}}</a></h3>
+        <div class="card__meta card__meta--split">
+          <span class="mono text-sm muted">{{.DBName}}</span>
+          {{template "levelBadge" .Level}}
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{else if not .IsAdmin}}
+  {{/* Kosong: belum ada akses database */}}
+  <div class="empty-state">
+    <h2 class="empty-state__title">No databases yet</h2>
+    <p>You are not in any group with database access.<br/>Ask a Platform Admin to add you to the right group.</p>
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}

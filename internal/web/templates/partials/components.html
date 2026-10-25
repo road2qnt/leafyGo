@@ -1,0 +1,177 @@
+{{define "leafIcon"}}<svg aria-hidden="true" focusable="false"><use href="/static/icons/leafyGo.svg#icon"/></svg>{{end}}
+
+{{/* Close dan auto-close via app.js. */}}
+{{define "flash"}}
+<div class="flash flash--{{.Kind}}" data-flash{{if eq .Kind "error"}} role="alert"{{else}} role="status"{{end}}>
+  {{if ne .Kind "error"}}<div class="flash__timer" aria-hidden="true"></div>{{end}}
+  <p class="flash__message">{{.Message}}</p>
+  <button class="flash__close" type="button" aria-label="Dismiss notification" hidden>×</button>
+</div>
+{{end}}
+
+{{define "levelBadge"}}<span class="badge badge--{{.String}}">{{levelLabel .}}</span>{{end}}
+
+{{define "statusText"}}<span class="status-text status-text--{{.}}">{{statusLabel .}}</span>{{end}}
+
+{{define "statusBadge"}}<span class="badge badge--{{.}}">{{statusLabel .}}</span>{{end}}
+
+{{/* Arg: pageData. */}}
+{{define "dbHeader"}}{{template "dbHeaderWith" dict "page" . "action" true}}{{end}}
+
+{{/* Arg: page, action. */}}
+{{define "dbHeaderWith"}}
+{{$action := .action}}
+{{with .page}}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="/">Databases</a></li>
+    <li><span aria-current="page">{{.DB.Name}}</span></li>
+  </ol>
+</nav>
+<div class="page-header">
+  <div>
+    <h1>{{.DB.Name}}</h1>
+    <p class="page-header__meta">{{template "levelBadge" .Level}}</p>
+  </div>
+  {{if and $action .Level.CanEdit}}
+  <div class="page-header__actions">
+    <a class="btn btn--primary" href="/databases/{{.DB.ID}}/migrations/new">{{template "icon" "plus"}}New migration draft</a>
+  </div>
+  {{end}}
+</div>
+<nav class="tabs" aria-label="Database sections">
+  <ul>
+    <li><a href="/databases/{{.DB.ID}}"{{if eq .Nav "db-overview"}} aria-current="page"{{end}}>Overview</a></li>
+    {{if not .TargetDown}}
+    <li><a href="/databases/{{.DB.ID}}/schema"{{if eq .Nav "db-schema"}} aria-current="page"{{end}}>Schema</a></li>
+    <li><a href="/databases/{{.DB.ID}}/data"{{if eq .Nav "db-data"}} aria-current="page"{{end}}>Data</a></li>
+    {{end}}
+    <li><a href="/databases/{{.DB.ID}}/migrations"{{if eq .Nav "db-migrations"}} aria-current="page"{{end}}>Migration history</a></li>
+    {{if .Level.CanEdit}}<li><a href="/databases/{{.DB.ID}}/migrations/drafts"{{if eq .Nav "db-drafts"}} aria-current="page"{{end}}>Drafts</a></li>{{end}}
+  </ul>
+</nav>
+{{end}}
+{{end}}
+
+{{/* Arg: name, label, value, error, type, hint, autocomplete, required, id. */}}
+{{define "field"}}
+{{$id := printf "f-%s" (or .id .name)}}
+<div class="field">
+  <label class="field__label" for="{{$id}}">{{.label}}</label>
+  {{with .hint}}<p class="field__hint" id="{{$id}}-hint">{{.}}</p>{{end}}
+  {{if eq (or .type "text") "password"}}<div class="input-group">{{end}}
+  <input class="input" id="{{$id}}" name="{{.name}}" type="{{or .type "text"}}" value="{{.value}}"
+    {{with .autocomplete}}autocomplete="{{.}}"{{end}}
+    {{if .required}}required{{end}}
+    {{if .error}}aria-invalid="true"{{end}}
+    {{if or .hint .error}}aria-describedby="{{if .hint}}{{$id}}-hint{{end}}{{if and .hint .error}} {{end}}{{if .error}}{{$id}}-error{{end}}"{{end}}>
+  {{if eq (or .type "text") "password"}}{{template "revealButton" $id}}</div>{{end}}
+  {{with .error}}<p class="field__error" id="{{$id}}-error">{{.}}</p>{{end}}
+</div>
+{{end}}
+
+{{/* Toggle password via app.js. */}}
+{{define "revealButton"}}<button class="input-group__btn" type="button" data-reveal="{{.}}" aria-controls="{{.}}" aria-pressed="false" aria-label="Show password" hidden><svg class="icon-eye" aria-hidden="true" focusable="false"><use href="/static/icons/eye.svg#icon"/></svg><svg class="icon-eye-off" aria-hidden="true" focusable="false"><use href="/static/icons/eye-off.svg#icon"/></svg></button>
+{{end}}
+
+{{define "formError"}}{{with index .Errors "form"}}
+<div class="alert alert--error" role="alert">
+  <div>
+    <p class="alert__title">Could not save</p>
+    <p>{{.}}</p>
+  </div>
+</div>
+{{end}}{{end}}
+
+{{define "rowCount"}}{{if .}}{{formatInt .}}{{else}}<span class="muted">-</span>{{end}}{{end}}
+
+{{/* Arg: pesan galat target. */}}
+{{define "targetError"}}
+<div class="alert alert--error" role="alert">
+  <div>
+    <p class="alert__title">Cannot connect to the database</p>
+    <p>{{.}}</p>
+    <p class="text-sm">Schema and data are unavailable for now. Migration history is still available.</p>
+  </div>
+</div>
+{{end}}
+
+{{define "relkindBadge"}}<span class="badge badge--kind">{{relkindLabel .}}</span>{{end}}
+
+{{/* Arg: title, sql, errors, errorLine. */}}
+{{define "draftFields"}}
+{{$e := or .errors (dict)}}
+{{template "field" dict "name" "title" "label" "Title" "value" .title "error" (index $e "title") "hint" "Optional, up to 200 characters." "autocomplete" "off"}}
+<div class="field">
+  <label class="field__label" for="f-sql">SQL</label>
+  <p class="field__hint" id="f-sql-hint">All statements run in a single transaction. Do not write BEGIN, COMMIT, or ROLLBACK yourself.</p>
+  {{/* Gutter dan hint dari editor.js. */}}
+  <div class="code-editor" data-code-editor{{with .errorLine}} data-error-line="{{.}}"{{end}}>
+    <div class="code-editor__gutter" aria-hidden="true" hidden></div>
+    <textarea class="textarea textarea--code" id="f-sql" name="sql" rows="16" spellcheck="false" autocapitalize="off" autocomplete="off" required
+      {{if index $e "sql"}}aria-invalid="true" aria-describedby="f-sql-hint f-sql-error"{{else}}aria-describedby="f-sql-hint"{{end}}>{{.sql}}</textarea>
+  </div>
+  <p class="field__hint" id="f-sql-keys" data-editor-hint hidden></p>
+  {{with index $e "sql"}}<p class="field__error" id="f-sql-error">{{.}}</p>{{end}}
+</div>
+{{end}}
+
+{{/* Arg: prefix, values, errors. */}}
+{{define "groupFields"}}
+{{$v := or .values (dict)}}
+{{$e := or .errors (dict)}}
+{{template "field" dict "id" (printf "%s-name" .prefix) "name" "name" "label" "Group name" "value" (index $v "name") "error" (index $e "name") "autocomplete" "off" "required" true}}
+<div class="field">
+  <label class="field__label" for="f-{{.prefix}}-description">Description <span class="field__optional">(optional)</span></label>
+  <textarea class="textarea" id="f-{{.prefix}}-description" name="description" rows="2">{{index $v "description"}}</textarea>
+</div>
+{{end}}
+
+{{/* Arg: base, db, explain, cancel, delete. */}}
+{{define "draftActions"}}
+<div class="form__actions">
+  <button class="btn btn--primary" type="submit" formnovalidate data-shortcut="save">Save</button>
+  <button class="btn" type="submit" formaction="{{.base}}/explain" formnovalidate data-shortcut="explain">Explain</button>
+  {{with .cancel}}<a class="btn btn--ghost" href="{{.}}">Cancel</a>{{end}}
+  {{if .delete}}
+  <details class="disclosure disclosure--danger form__actions-end">
+    <summary>{{template "icon" "trash"}}Delete draft</summary>
+    <div class="disclosure__body">
+      <p>This draft will be permanently deleted. Migration history is not affected.</p>
+      <button class="btn btn--danger" type="submit" formaction="{{.base}}/delete" formnovalidate>Yes, delete draft</button>
+    </div>
+  </details>
+  {{end}}
+</div>
+{{with .explain}}{{template "explainPanel" .}}{{end}}
+<div class="form__execute">
+  <label class="check">
+    <input type="checkbox" name="confirm" value="yes" required>
+    <span>I have reviewed this SQL and am ready to execute it on <strong>{{.db}}</strong>.</span>
+  </label>
+  <button class="btn" type="submit" formaction="{{.base}}/execute">{{template "icon" "play"}}Save and execute</button>
+</div>
+{{end}}
+
+{{/* Arg: *explainView. */}}
+{{define "explainPanel"}}
+{{if .Error}}
+<div class="alert alert--warning" role="alert" id="explain"><p>{{.Error}}</p></div>
+{{else}}
+{{template "codeView" dict "id" "explain" "label" "EXPLAIN result" "text" .Plan}}
+{{end}}
+{{end}}
+
+{{/* Arg: id, label, text. */}}
+{{define "codeView"}}
+<section class="field" aria-labelledby="{{.id}}-title" id="{{.id}}">
+  <h3 class="field__label" id="{{.id}}-title">{{.label}}</h3>
+  <div class="code-view">
+    <div class="code-editor__gutter" aria-hidden="true">{{range $i, $_ := lines .text}}{{if $i}}{{"\n"}}{{end}}{{add $i 1}}{{end}}</div>
+    <pre class="code-view__body" tabindex="0" aria-labelledby="{{.id}}-title">{{.text}}</pre>
+  </div>
+</section>
+{{end}}
+
+{{/* Arg: nama file di static/icons. */}}
+{{define "icon"}}<svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons/{{.}}.svg#icon"/></svg>{{end}}

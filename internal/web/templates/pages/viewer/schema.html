@@ -1,0 +1,125 @@
+{{define "content"}}
+{{/* Header database dan tab */}}
+{{template "dbHeader" .}}
+{{$root := .}}
+{{with .Data}}
+{{/* Peringatan target tidak terhubung */}}
+{{with .TargetError}}
+{{template "targetError" .}}
+{{else}}
+{{/* Detail satu tabel atau view */}}
+{{with .Detail}}
+<div class="stack--lg">
+  <div>
+    {{/* Breadcrumb */}}
+    <nav class="breadcrumb" aria-label="Table location">
+      <ol>
+        <li><a href="/databases/{{$root.DB.ID}}/schema">All tables</a></li>
+        <li><span aria-current="page" class="mono">{{.Schema}}.{{.Name}}</span></li>
+      </ol>
+    </nav>
+    {{/* Judul tabel */}}
+    <div class="detail-header">
+      <h2 class="detail-title">{{template "relkindBadge" .Kind}} <span class="mono">{{.Schema}}.{{.Name}}</span></h2>
+      {{with .RowCount}}<p class="detail-header__meta muted text-sm">{{rowsLabel .}}</p>{{end}}
+    </div>
+  </div>
+
+  {{/* Tabel kolom */}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="cols-caption">
+    <table class="table">
+      <caption id="cols-caption">{{count (len .Columns) "column" "columns"}}</caption>
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Nullable</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        {{range .Columns}}
+        <tr>
+          <td class="num">{{.Ordinal}}</td>
+          <th scope="row" class="mono">{{.Name}}{{if .IsPK}} <abbr class="pk-tag" title="Primary key">PK</abbr>{{end}}</th>
+          <td class="mono">{{.DataType}}</td>
+          <td>{{if .Nullable}}Yes{{else}}No{{end}}</td>
+          <td class="mono">{{if .Default}}{{.Default}}{{else}}<span class="cell-null">none</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{/* Tabel constraint */}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="cons-caption">
+    <table class="table">
+      <caption id="cons-caption">{{count (len .Constraints) "constraint" "constraints"}}</caption>
+      {{if .Constraints}}
+      <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Definition</th></tr></thead>
+      <tbody>
+        {{range .Constraints}}
+        <tr><th scope="row" class="mono">{{.Name}}</th><td class="nowrap">{{constraintLabel .Type}}</td><td class="mono">{{.Definition}}</td></tr>
+        {{end}}
+      </tbody>
+      {{else}}
+      <tbody><tr><td class="muted">No constraints.</td></tr></tbody>
+      {{end}}
+    </table>
+  </div>
+
+  {{/* Tabel index */}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="idx-caption">
+    <table class="table">
+      <caption id="idx-caption">{{count (len .Indexes) "index" "indexes"}}</caption>
+      {{if .Indexes}}
+      <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Definition</th></tr></thead>
+      <tbody>
+        {{range .Indexes}}
+        <tr>
+          <th scope="row" class="mono">{{.Name}}</th>
+          <td class="nowrap">{{if .Primary}}Primary{{else if .Unique}}Unique{{else}}Regular{{end}}</td>
+          <td class="mono">{{.Definition}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+      {{else}}
+      <tbody><tr><td class="muted">No indexes.</td></tr></tbody>
+      {{end}}
+    </table>
+  </div>
+
+  {{/* Aksi bawah */}}
+  <div class="actions-row">
+    {{if .CanSelect}}<a class="btn" href="/databases/{{$root.DB.ID}}/data?schema={{.Schema}}&amp;table={{.Name}}">Browse data</a>{{end}}
+    <a class="actions-row__end" href="/databases/{{$root.DB.ID}}/schema">Back to all tables</a>
+  </div>
+</div>
+{{else}}
+{{/* Daftar semua tabel dan view */}}
+<section aria-labelledby="tables-caption">
+  {{if .Tables}}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="tables-caption">
+    <table class="table">
+      <caption id="tables-caption">{{count (len .Tables) "table or view" "tables and views"}}</caption>
+      <thead>
+        <tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Rows</th><th scope="col">Data</th></tr>
+      </thead>
+      <tbody>
+        {{range .Tables}}
+        <tr>
+          <td class="mono">{{.Schema}}</td>
+          <th scope="row" class="mono"><a href="/databases/{{$root.DB.ID}}/schema?schema={{.Schema}}&amp;table={{.Name}}">{{.Name}}</a></th>
+          <td>{{relkindLabel .Kind}}</td>
+          <td class="num">{{template "rowCount" .RowCount}}</td>
+          <td>{{if .CanSelect}}<a href="/databases/{{$root.DB.ID}}/data?schema={{.Schema}}&amp;table={{.Name}}">Browse<span class="visually-hidden"> {{.Schema}}.{{.Name}}</span></a>{{else}}<span class="muted text-sm">No SELECT permission</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  {{/* Kosong: tidak ada tabel */}}
+  <div class="empty-state">
+    <h2 class="empty-state__title" id="tables-caption">No tables yet</h2>
+    <p>This database has no tables or views outside the built-in PostgreSQL schemas.</p>
+  </div>
+  {{end}}
+</section>
+{{end}}
+{{end}}
+{{end}}
+{{end}}

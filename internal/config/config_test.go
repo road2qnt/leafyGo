@@ -21,6 +21,7 @@ func baseEnv(t *testing.T) {
 	withEnv(t, "SESSION_GRACE_PERIOD", "")
 	withEnv(t, "COOKIE_SECURE", "")
 	withEnv(t, "APP_ENV", "development")
+	withEnv(t, "UI_PREVIEW", "")
 	withEnv(t, "TARGET_CONNECT_TIMEOUT", "")
 	withEnv(t, "VIEWER_STATEMENT_TIMEOUT", "")
 	withEnv(t, "MIGRATION_ADVISORY_LOCK_TIMEOUT", "")
@@ -177,5 +178,14 @@ func TestLoadRejectsBadDuration(t *testing.T) {
 	withEnv(t, "SESSION_IDLE_TIMEOUT", "not-a-duration")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error for bad duration")
+	}
+}
+
+func TestLoadRejectsUIPreviewInProduction(t *testing.T) {
+	baseEnv(t)
+	withEnv(t, "APP_ENV", "production")
+	withEnv(t, "UI_PREVIEW", "true")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for UI_PREVIEW in production")
 	}
 }

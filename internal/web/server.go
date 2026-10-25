@@ -22,22 +22,46 @@ import (
 	"leafygo/internal/auth"
 	"leafygo/internal/config"
 	"leafygo/internal/domain"
+	"leafygo/internal/migration"
+	"leafygo/internal/secret"
 	"leafygo/internal/store"
+	"leafygo/internal/target"
 )
 
-//go:embed templates/*.html templates/pages/*.html static/*
+//go:embed templates/*.html templates/pages/*/*.html templates/partials/*.html static/*
 var assets embed.FS
 
 type Server struct {
-	cfg      config.Config
-	store    *store.Store
-	sessions *auth.Manager
-	policy   *access.Policy
-	logger   *slog.Logger
-	limiter  *loginLimiter
+	cfg        config.Config
+	store      *store.Store
+	sessions   *auth.Manager
+	policy     *access.Policy
+	logger     *slog.Logger
+	limiter    *loginLimiter
+	box        *secret.Box
+	targets    *target.Manager
+	migrations *migration.Service
 }
 
+// cfg.EncryptionKey sudah divalidasi config.Load.
 func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *access.Policy, logger *slog.Logger) *Server {
+	if cfg.ViewerPageSize <= 0 {
+		cfg.ViewerPageSize = 50
+	}
+	if cfg.ViewerMaxPageSize < cfg.ViewerPageSize {
+		cfg.ViewerMaxPageSize = max(cfg.ViewerPageSize, 100)
+	}
+	if cfg.MaxMigrationBytes <= 0 {
+		cfg.MaxMigrationBytes = 1 << 20
+	}
+	box, err := secret.New(cfg.EncryptionKey)
+	if err != nil {
+		panic(err)
+	}
+	targets := target.New(box, target.Options{
+		ConnectTimeout: cfg.TargetConnectTimeout,
+		ViewerTimeout:  cfg.ViewerStatementTimeout,
+	})
 	return &Server{
 		cfg:      cfg,
 		store:    st,
@@ -45,8 +69,17 @@ func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *acc
 		policy:   policy,
 		logger:   logger,
 		limiter:  newLoginLimiter(8, 5*time.Minute),
+		box:      box,
+		targets:  targets,
+		migrations: migration.NewService(st, targets, migration.Options{
+			AdvisoryLockTimeout: cfg.MigrationAdvisoryLockTimeout,
+			MigrationTimeout:    cfg.MigrationTimeout,
+			MaxMigrationBytes:   int(cfg.MaxMigrationBytes),
+		}),
 	}
 }
+
+func (s *Server) Close() { s.targets.Close() }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +104,16 @@ func (s *Server) Handler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
+	r.Handle("/static/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		staticHandler.ServeHTTP(w, req)
+	}))
+
+	if s.cfg.UIPreview {
+		r.Get("/_preview", s.handlePreviewIndex)
+		r.Get("/_preview/{key}", s.handlePreview)
+	}
 
 	r.Get("/login", s.handleLoginGet)
 	r.Post("/login", s.handleLoginPost)
@@ -84,45 +126,60 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/", s.handleDashboard)
 
 		r.Route("/admin", func(r chi.Router) {
-			// Jibril: admin
 			r.Use(s.requirePlatformAdmin)
-			r.Get("/users", s.stubNotImplemented("admin users — Jibril"))
-			r.Post("/users", s.stubNotImplemented("admin users — Jibril"))
-			r.Get("/groups", s.stubNotImplemented("admin groups — Jibril"))
-			r.Post("/groups", s.stubNotImplemented("admin groups — Jibril"))
-			r.Get("/databases", s.stubNotImplemented("admin databases — Jibril"))
-			r.Post("/databases", s.stubNotImplemented("admin databases — Jibril"))
+			r.Get("/users", s.handleAdminUsers)
+			r.Post("/users", s.handleAdminUserCreate)
+			r.Post("/users/{userID}/password", s.handleAdminUserPassword)
+			r.Post("/users/{userID}/active", s.handleAdminUserActive)
+
+			r.Get("/groups", s.handleAdminGroups)
+			r.Get("/groups/new", s.handleAdminGroupNew)
+			r.Post("/groups", s.handleAdminGroupCreate)
+			r.Get("/groups/{groupID}", s.handleAdminGroup)
+			r.Post("/groups/{groupID}", s.handleAdminGroupUpdate)
+			r.Post("/groups/{groupID}/members", s.handleAdminGroupMembers)
+			r.Post("/groups/{groupID}/access", s.handleAdminGroupAccess)
+			r.Post("/groups/{groupID}/delete", s.handleAdminGroupDelete)
+
+			r.Get("/databases", s.handleAdminDatabases)
+			r.Get("/databases/new", s.handleAdminDatabaseNew)
+			r.Post("/databases", s.handleAdminDatabaseCreate)
+			r.Get("/databases/{dbID}", s.handleAdminDatabase)
+			r.Post("/databases/{dbID}", s.handleAdminDatabaseUpdate)
+			r.Post("/databases/{dbID}/test", s.handleAdminDatabaseTest)
+			r.Post("/databases/{dbID}/delete", s.handleAdminDatabaseDelete)
 		})
 
 		r.Route("/databases/{id}", func(r chi.Router) {
-			// Jibril: viewer + migration
-			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.stubNotImplemented("viewer overview — Jibril"))
-			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.stubNotImplemented("viewer schema — Jibril"))
-			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.stubNotImplemented("viewer data — Jibril"))
-			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.stubNotImplemented("migration history — Jibril"))
-			r.With(s.requireDBAction(access.ActionManageDrafts)).Get("/migrations/new", s.stubNotImplemented("migration editor — Jibril"))
-			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations", s.stubNotImplemented("migration execute — Jibril"))
-			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/explain", s.stubNotImplemented("migration explain — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.handleOverview)
+			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.handleSchema)
+			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
+			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleHistory)
+
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireDBAction(access.ActionManageDrafts))
+				r.Get("/migrations/drafts", s.handleDrafts)
+				r.Get("/migrations/new", s.handleDraftNew)
+				r.Post("/migrations/drafts", s.handleDraftCreate)
+				r.Get("/migrations/drafts/{draftID}", s.handleDraftEditor)
+				r.Post("/migrations/drafts/{draftID}", s.handleDraftSave)
+				r.Post("/migrations/drafts/{draftID}/delete", s.handleDraftDelete)
+			})
+			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/explain", s.handleDraftNewExplain)
+			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/{draftID}/explain", s.handleDraftExplain)
+			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/execute", s.handleDraftNewExecute)
+			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/{draftID}/execute", s.handleDraftExecute)
 		})
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		s.renderError(w, r, http.StatusNotFound, "Halaman tidak ditemukan.")
+		s.renderError(w, r, http.StatusNotFound, "Page not found.")
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		s.renderError(w, r, http.StatusMethodNotAllowed, "Metode request tidak diizinkan.")
+		s.renderError(w, r, http.StatusMethodNotAllowed, "Request method not allowed.")
 	})
 
 	return r
-}
-
-func (s *Server) stubNotImplemented(what string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.render(w, r, http.StatusNotImplemented, "stub.html", pageData{
-			Title:   "Belum diimplementasi",
-			Message: "Bagian " + what + " belum diimplementasi pada slice ini.",
-		})
-	}
 }
 
 type ctxKey int
@@ -171,7 +228,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			s.setSessionCookie(w, newRaw)
 		}
 		user, err := s.store.GetUserByID(r.Context(), sess.UserID)
-		if err != nil {
+		if err != nil || !user.IsActive {
 			s.clearSessionCookie(w)
 			s.redirectToLogin(w, r)
 			return
@@ -191,11 +248,11 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 		}
 		sess := currentSession(r)
 		if sess == nil {
-			s.renderError(w, r, http.StatusForbidden, "Sesi tidak valid.")
+			s.renderError(w, r, http.StatusForbidden, "Invalid session.")
 			return
 		}
 		if err := r.ParseForm(); err != nil {
-			s.renderError(w, r, http.StatusBadRequest, "Form tidak valid.")
+			s.renderError(w, r, http.StatusBadRequest, "Invalid form.")
 			return
 		}
 		token := r.FormValue("csrf_token")
@@ -203,7 +260,7 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 			token = r.Header.Get("X-CSRF-Token")
 		}
 		if !constantTimeEqual(token, sess.CSRFToken) {
-			s.renderError(w, r, http.StatusForbidden, "Token CSRF tidak valid. Muat ulang halaman lalu coba lagi.")
+			s.renderError(w, r, http.StatusForbidden, "Invalid CSRF token. Reload the page and try again.")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -215,7 +272,7 @@ func (s *Server) requirePlatformAdmin(next http.Handler) http.Handler {
 		user := currentUser(r)
 		if user == nil || !user.IsPlatformAdmin {
 			s.auditDenied(r, "admin", r.URL.Path)
-			s.renderError(w, r, http.StatusForbidden, "Halaman ini hanya untuk Platform Admin.")
+			s.renderError(w, r, http.StatusForbidden, "This page is for Platform Admins only.")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -232,31 +289,31 @@ func (s *Server) requireDBAction(action access.Action) func(http.Handler) http.H
 			}
 			id, err := uuid.Parse(chi.URLParam(r, "id"))
 			if err != nil {
-				s.renderError(w, r, http.StatusNotFound, "Database tidak ditemukan.")
+				s.renderError(w, r, http.StatusNotFound, "Database not found.")
 				return
 			}
 			conn, err := s.store.GetDBConnection(r.Context(), id)
 			if errors.Is(err, store.ErrNotFound) {
-				s.renderError(w, r, http.StatusNotFound, "Database tidak ditemukan.")
+				s.renderError(w, r, http.StatusNotFound, "Database not found.")
 				return
 			}
 			if err != nil {
 				s.logger.Error("load database", "error", err)
-				s.renderError(w, r, http.StatusInternalServerError, "Gagal memuat database.")
+				s.renderError(w, r, http.StatusInternalServerError, "Could not load the database.")
 				return
 			}
 			level, err := s.policy.Level(r.Context(), *user, id)
 			if err != nil {
 				s.logger.Error("check access", "error", err)
-				s.renderError(w, r, http.StatusInternalServerError, "Gagal memeriksa hak akses.")
+				s.renderError(w, r, http.StatusInternalServerError, "Could not check access rights.")
 				return
 			}
 			if !access.Can(level, action) {
 				s.auditDenied(r, string(action), id.String())
 				if user.IsPlatformAdmin {
-					s.renderError(w, r, http.StatusForbidden, "Akun admin tidak memiliki akses ke utilitas pengguna.")
+					s.renderError(w, r, http.StatusForbidden, "Platform Admin accounts cannot access database tools.")
 				} else {
-					s.renderError(w, r, http.StatusForbidden, "Anda tidak memiliki hak akses yang cukup pada database ini.")
+					s.renderError(w, r, http.StatusForbidden, "You do not have sufficient access to this database.")
 				}
 				return
 			}
@@ -353,10 +410,29 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 			data.CSRF = sess.CSRFToken
 		}
 	}
-	data.Flash = s.readFlash(w, r)
+	if data.Flash == nil {
+		data.Flash = s.readFlash(w, r)
+	}
 
 	funcs := template.FuncMap{
-		"levelLabel": func(l domain.AccessLevel) string { return l.Label() },
+		"levelLabel":      func(l domain.AccessLevel) string { return l.Label() },
+		"statusLabel":     statusLabel,
+		"relkindLabel":    relkindLabel,
+		"constraintLabel": constraintLabel,
+		"formatTime":      formatTime,
+		"formatDuration":  formatDuration,
+		"formatInt":       formatInt,
+		"isoTime":         formatISOTime,
+		"truncate":        truncate,
+		"pageLinks":       pageLinks,
+		"dict":            dict,
+		"join":            strings.Join,
+		"count":           countLabel,
+		"rowsLabel":       rowsLabel,
+		"lines":           func(s string) []string { return strings.Split(strings.TrimRight(s, "\n"), "\n") },
+		"list":            func(v ...string) []string { return v },
+		"add":             func(a, b int) int { return a + b },
+		"sub":             func(a, b int) int { return a - b },
 		"dash": func(v string) string {
 			if strings.TrimSpace(v) == "" {
 				return "—"
@@ -364,7 +440,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 			return v
 		},
 	}
-	tmpl, err := template.New("layout").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/pages/"+page)
+	tmpl, err := template.New("layout").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partials/*.html", "templates/pages/"+page)
 	if err != nil {
 		s.logger.Error("parse template", "page", page, "error", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
@@ -379,19 +455,22 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 }
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, message string) {
-	s.render(w, r, status, "error.html", pageData{Title: "Error", Message: message})
+	s.render(w, r, status, "system/error.html", pageData{Title: "Error", Message: message})
 }
 
 type pageData struct {
-	Title   string
-	Nav     string
-	User    *domain.User
-	CSRF    string
-	Flash   *flashMessage
-	Message string
-	Data    any
-	DB      *domain.DBConnection
-	Level   domain.AccessLevel
+	Title      string
+	Nav        string
+	User       *domain.User
+	CSRF       string
+	Flash      *flashMessage
+	Message    string
+	Data       any
+	DB         *domain.DBConnection
+	Level      domain.AccessLevel
+	TargetDown bool
+	Preview    bool
+	NoHeader   bool
 }
 
 type flashMessage struct {

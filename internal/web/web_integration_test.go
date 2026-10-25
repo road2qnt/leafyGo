@@ -191,7 +191,7 @@ func TestLoginFlowAndCookieFlags(t *testing.T) {
 	}
 }
 
-func TestViewOnlyCannotReachEditStubs(t *testing.T) {
+func TestViewOnlyCannotReachEditRoutes(t *testing.T) {
 	srv, st := testServer(t)
 	ctx := context.Background()
 	seedUser(t, st, "budi", "password123", false)
@@ -211,32 +211,43 @@ func TestViewOnlyCannotReachEditStubs(t *testing.T) {
 	sid, csrf := login(t, srv, "budi", "password123")
 	base := "/databases/" + conn.ID.String()
 
-	for _, path := range []string{base + "/", base + "/schema", base + "/data", base + "/migrations"} {
-		rec := getWithSession(t, srv, path, sid)
-		if rec.Code != http.StatusNotImplemented {
-			t.Fatalf("GET %s status = %d; want 501 (passed RBAC)", path, rec.Code)
+	// Target palsu: semua halaman tetap 200 dan schema/data menampilkan banner galat.
+	for path, want := range map[string]int{
+		base + "/":           http.StatusOK,
+		base + "/schema":     http.StatusOK,
+		base + "/data":       http.StatusOK,
+		base + "/migrations": http.StatusOK,
+	} {
+		if rec := getWithSession(t, srv, path, sid); rec.Code != want {
+			t.Fatalf("GET %s status = %d; want %d (passed RBAC)", path, rec.Code, want)
 		}
 	}
 
-	if rec := getWithSession(t, srv, base+"/migrations/new", sid); rec.Code != http.StatusForbidden {
-		t.Fatalf("GET editor status = %d; want 403", rec.Code)
+	for _, path := range []string{base + "/migrations/new", base + "/migrations/drafts"} {
+		if rec := getWithSession(t, srv, path, sid); rec.Code != http.StatusForbidden {
+			t.Fatalf("GET %s status = %d; want 403", path, rec.Code)
+		}
 	}
-	for _, path := range []string{base + "/migrations", base + "/migrations/explain"} {
+	for _, path := range editPostPaths(base) {
 		if rec := postForm(t, srv, path, sid, csrf, nil); rec.Code != http.StatusForbidden {
 			t.Fatalf("POST %s status = %d; want 403", path, rec.Code)
 		}
 	}
 }
 
-func TestAdminDeniedOnAllDatabaseStubs(t *testing.T) {
+func editPostPaths(base string) []string {
+	return []string{base + "/migrations/drafts", base + "/migrations/drafts/explain", base + "/migrations/drafts/execute"}
+}
+
+func TestAdminDeniedOnAllDatabaseRoutes(t *testing.T) {
 	srv, st := testServer(t)
 	seedUser(t, st, "admin", "password123", true)
 	conn := seedDBConnection(t, st, "demo")
 	sid, csrf := login(t, srv, "admin", "password123")
 	base := "/databases/" + conn.ID.String()
-	const wantMessage = "Akun admin tidak memiliki akses ke utilitas pengguna."
+	const wantMessage = "Platform Admin accounts cannot access database tools."
 
-	for _, path := range []string{base + "/", base + "/schema", base + "/data", base + "/migrations", base + "/migrations/new"} {
+	for _, path := range []string{base + "/", base + "/schema", base + "/data", base + "/migrations", base + "/migrations/new", base + "/migrations/drafts"} {
 		rec := getWithSession(t, srv, path, sid)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("GET %s status = %d; want 403", path, rec.Code)
@@ -245,7 +256,7 @@ func TestAdminDeniedOnAllDatabaseStubs(t *testing.T) {
 			t.Fatalf("GET %s body does not contain admin denial message", path)
 		}
 	}
-	for _, path := range []string{base + "/migrations", base + "/migrations/explain"} {
+	for _, path := range editPostPaths(base) {
 		rec := postForm(t, srv, path, sid, csrf, nil)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("POST %s status = %d; want 403", path, rec.Code)
@@ -280,7 +291,7 @@ func TestAdminAlwaysNoneEvenWithLegacyGroupMembership(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("admin legacy access status = %d; want 403", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Akun admin tidak memiliki akses ke utilitas pengguna.") {
+	if !strings.Contains(rec.Body.String(), "Platform Admin accounts cannot access database tools.") {
 		t.Fatal("admin legacy access should show admin denial message")
 	}
 }

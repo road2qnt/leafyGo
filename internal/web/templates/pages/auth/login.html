@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="auth-shell">
+  <div class="auth-card">
+    <div class="card">
+      {{/* Brand */}}
+      <h1 class="auth-brand">
+        <span class="brand__mark">{{template "leafIcon"}}</span>
+        <span><span class="visually-hidden">Sign in to </span>leafy<span class="brand__go">Go</span></span>
+      </h1>
+      {{with .Flash}}{{template "flash" .}}{{end}}
+      {{/* Form login */}}
+      <form class="form" method="post" action="/login">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        {{with .Data}}<input type="hidden" name="next" value="{{index . "Next"}}">{{end}}
+        {{template "field" dict "name" "username" "label" "Username" "autocomplete" "username" "required" true}}
+        {{template "field" dict "name" "password" "label" "Password" "type" "password" "autocomplete" "current-password" "required" true}}
+        <div class="form__actions">
+          <button class="btn btn--primary btn--block" type="submit">Sign in</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{{end}}

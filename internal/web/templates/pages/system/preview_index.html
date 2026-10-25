@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="page-header">
+  <div>
+    <h1>Page previews</h1>
+  </div>
+</div>
+{{/* Daftar preview per kelompok */}}
+<div class="grid">
+  {{range .Data}}
+  <section class="card" aria-labelledby="pv-{{.Name}}">
+    <h2 id="pv-{{.Name}}" class="card__title">{{.Title}}</h2>
+    <ul class="link-list">
+      {{range .Items}}<li><a href="/_preview/{{.Key}}">{{.Label}}</a></li>{{end}}
+    </ul>
+  </section>
+  {{end}}
+</div>
+{{end}}
