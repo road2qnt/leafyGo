@@ -5,15 +5,7 @@
 {{with .Data}}
 <div class="stack--lg">
   {{/* Peringatan target tidak terhubung */}}
-  {{with .TargetError}}
-  <div class="alert alert--error" role="alert">
-    <div>
-      <p class="alert__title">Cannot connect to the database</p>
-      <p>{{.}}</p>
-      <p class="text-sm">Schema and data are unavailable for now. Migration history is still available.</p>
-    </div>
-  </div>
-  {{end}}
+  {{with .TargetError}}{{template "targetError" .}}{{end}}
   {{/* Kartu statistik */}}
   <div class="grid grid--stats">
     <div class="card stat">

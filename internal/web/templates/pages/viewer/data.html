@@ -5,6 +5,7 @@
 {{with .Data}}
 <div class="stack">
 {{/* Peringatan */}}
+{{with .TargetError}}{{template "targetError" .}}{{else}}
 {{with .Notice}}<div class="alert alert--warning" role="status"><p>{{.}}</p></div>{{end}}
 {{/* Isi tabel terpilih */}}
 {{with .Page}}
@@ -12,21 +13,22 @@
   {{/* Judul tabel */}}
   <div class="detail-header">
     <h2 class="detail-title mono">{{.Schema}}.{{.Table}}</h2>
-    {{with .EstimatedRows}}<p class="detail-header__meta muted text-sm">About {{formatInt .}} rows</p>{{end}}
+    {{with .RowCount}}<p class="detail-header__meta muted text-sm">{{rowsLabel .}}</p>{{end}}
   </div>
   {{/* Catatan urutan baris */}}
   {{with .OrderNote}}<div class="alert alert--info" role="note"><p>{{.}}</p></div>{{end}}
   {{/* Tabel data */}}
   {{if .Rows}}
+  {{$cols := .Columns}}
   <div class="table-wrap" tabindex="0" role="region" aria-labelledby="data-caption">
     <table class="table table--data">
       <caption id="data-caption">Page {{.Page}}, {{count (len .Rows) "row" "rows"}}</caption>
       <thead>
-        <tr>{{range .Columns}}<th scope="col">{{.}}</th>{{end}}</tr>
+        <tr>{{range .Columns}}<th scope="col"{{if .Numeric}} class="num"{{end}}>{{.Name}}</th>{{end}}</tr>
       </thead>
       <tbody>
         {{range .Rows}}
-        <tr>{{range .}}<td{{if gt (len .Text) 200}} title="Value truncated for display"{{end}}>{{if .IsNull}}<span class="cell-null">NULL</span>{{else if eq .Text ""}}<span class="cell-null">''<span class="visually-hidden"> (empty string)</span></span>{{else}}{{truncate .Text 200}}{{end}}</td>{{end}}</tr>
+        <tr>{{range $i, $c := .}}<td{{if (index $cols $i).Numeric}} class="num"{{end}}{{if gt (len .Text) 200}} title="Value truncated for display"{{end}}>{{if .IsNull}}<span class="cell-null">NULL</span>{{else if eq .Text ""}}<span class="cell-null">''<span class="visually-hidden"> (empty string)</span></span>{{else}}{{truncate .Text 200}}{{end}}</td>{{end}}</tr>
         {{end}}
       </tbody>
     </table>
@@ -47,7 +49,7 @@
     <span class="btn btn--sm" aria-disabled="true">{{template "icon" "chevron-left"}}Previous</span>
     {{end}}
     <ul class="pagination__pages" role="list">
-      {{range pageLinks .Page .PageSize .HasNext .EstimatedRows}}
+      {{range pageLinks .Page .PageSize .HasNext .RowCount}}
       {{if .Gap}}
       <li><span class="pagination__gap" aria-hidden="true">…</span></li>
       {{else if .Current}}
@@ -73,14 +75,14 @@
   <div class="table-wrap" tabindex="0" role="region" aria-labelledby="pick-caption">
     <table class="table">
       <caption id="pick-caption">Choose a table to browse. Data is read only.</caption>
-      <thead><tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Estimated rows</th></tr></thead>
+      <thead><tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Rows</th></tr></thead>
       <tbody>
         {{range .Tables}}
         <tr>
           <td class="mono">{{.Schema}}</td>
           <th scope="row" class="mono">{{if .CanSelect}}<a href="/databases/{{$root.DB.ID}}/data?schema={{.Schema}}&amp;table={{.Name}}">{{.Name}}</a>{{else}}{{.Name}} <span class="muted text-sm">(no SELECT permission)</span>{{end}}</th>
           <td>{{relkindLabel .Kind}}</td>
-          <td class="num">{{template "estimatedRows" .EstimatedRows}}</td>
+          <td class="num">{{template "rowCount" .RowCount}}</td>
         </tr>
         {{end}}
       </tbody>
@@ -96,5 +98,6 @@
 </section>
 {{end}}
 </div>
+{{end}}
 {{end}}
 {{end}}

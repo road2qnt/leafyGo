@@ -3,6 +3,10 @@
 {{template "dbHeader" .}}
 {{$root := .}}
 {{with .Data}}
+{{/* Peringatan target tidak terhubung */}}
+{{with .TargetError}}
+{{template "targetError" .}}
+{{else}}
 {{/* Detail satu tabel atau view */}}
 {{with .Detail}}
 <div class="stack--lg">
@@ -17,7 +21,7 @@
     {{/* Judul tabel */}}
     <div class="detail-header">
       <h2 class="detail-title">{{template "relkindBadge" .Kind}} <span class="mono">{{.Schema}}.{{.Name}}</span></h2>
-      {{with .EstimatedRows}}<p class="detail-header__meta muted text-sm">About {{formatInt .}} rows</p>{{end}}
+      {{with .RowCount}}<p class="detail-header__meta muted text-sm">{{rowsLabel .}}</p>{{end}}
     </div>
   </div>
 
@@ -92,7 +96,7 @@
     <table class="table">
       <caption id="tables-caption">{{count (len .Tables) "table or view" "tables and views"}}</caption>
       <thead>
-        <tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Estimated rows</th><th scope="col">Data</th></tr>
+        <tr><th scope="col">Schema</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="num">Rows</th><th scope="col">Data</th></tr>
       </thead>
       <tbody>
         {{range .Tables}}
@@ -100,7 +104,7 @@
           <td class="mono">{{.Schema}}</td>
           <th scope="row" class="mono"><a href="/databases/{{$root.DB.ID}}/schema?schema={{.Schema}}&amp;table={{.Name}}">{{.Name}}</a></th>
           <td>{{relkindLabel .Kind}}</td>
-          <td class="num">{{template "estimatedRows" .EstimatedRows}}</td>
+          <td class="num">{{template "rowCount" .RowCount}}</td>
           <td>{{if .CanSelect}}<a href="/databases/{{$root.DB.ID}}/data?schema={{.Schema}}&amp;table={{.Name}}">Browse<span class="visually-hidden"> {{.Schema}}.{{.Name}}</span></a>{{else}}<span class="muted text-sm">No SELECT permission</span>{{end}}</td>
         </tr>
         {{end}}
@@ -115,6 +119,7 @@
   </div>
   {{end}}
 </section>
+{{end}}
 {{end}}
 {{end}}
 {{end}}

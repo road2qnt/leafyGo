@@ -42,8 +42,10 @@
 <nav class="tabs" aria-label="Database sections">
   <ul>
     <li><a href="/databases/{{.DB.ID}}"{{if eq .Nav "db-overview"}} aria-current="page"{{end}}>Overview</a></li>
+    {{if not .TargetDown}}
     <li><a href="/databases/{{.DB.ID}}/schema"{{if eq .Nav "db-schema"}} aria-current="page"{{end}}>Schema</a></li>
     <li><a href="/databases/{{.DB.ID}}/data"{{if eq .Nav "db-data"}} aria-current="page"{{end}}>Data</a></li>
+    {{end}}
     <li><a href="/databases/{{.DB.ID}}/migrations"{{if eq .Nav "db-migrations"}} aria-current="page"{{end}}>Migration history</a></li>
     {{if .Level.CanEdit}}<li><a href="/databases/{{.DB.ID}}/migrations/drafts"{{if eq .Nav "db-drafts"}} aria-current="page"{{end}}>Drafts</a></li>{{end}}
   </ul>
@@ -81,7 +83,18 @@
 </div>
 {{end}}{{end}}
 
-{{define "estimatedRows"}}{{if .}}{{formatInt .}}{{else}}<span class="muted">unknown</span>{{end}}{{end}}
+{{define "rowCount"}}{{if .}}{{formatInt .}}{{else}}<span class="muted">-</span>{{end}}{{end}}
+
+{{/* Arg: pesan galat target. */}}
+{{define "targetError"}}
+<div class="alert alert--error" role="alert">
+  <div>
+    <p class="alert__title">Cannot connect to the database</p>
+    <p>{{.}}</p>
+    <p class="text-sm">Schema and data are unavailable for now. Migration history is still available.</p>
+  </div>
+</div>
+{{end}}
 
 {{define "relkindBadge"}}<span class="badge badge--kind">{{relkindLabel .}}</span>{{end}}
 

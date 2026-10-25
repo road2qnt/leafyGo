@@ -75,7 +75,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 /* Ruang untuk header sticky saat lompat ke anchor atau fokus. */
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 6rem; }
+html { scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 6rem; }
 
 body {
   margin: 0;
@@ -163,11 +163,13 @@ hr { border: 0; border-top: var(--border); margin: var(--space-6) 0; }
   align-items: center;
   gap: var(--space-2) var(--space-5);
   padding-block: var(--space-3);
+  --header-control: 2.75rem;
 }
 
 .brand {
   display: inline-flex;
   align-items: center;
+  min-height: var(--header-control);
   gap: var(--space-2);
   color: var(--paper);
   font-size: var(--text-lg);
@@ -185,18 +187,21 @@ hr { border: 0; border-top: var(--border); margin: var(--space-6) 0; }
 }
 .brand__mark svg { width: 2rem; height: 2rem; }
 .brand__go { color: var(--green-200); }
+.site-header .brand__name { position: relative; top: -0.095em; }
 
 .site-nav { flex: 1 1 auto; }
 .site-nav ul {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  margin: 0;
+  margin: 0 0 0 calc(-1 * (var(--space-3) + 2px));
   padding: 0;
   list-style: none;
 }
 .site-nav a {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: var(--header-control);
   padding: var(--space-2) var(--space-3);
   color: var(--paper);
   font-weight: 600;
@@ -210,11 +215,11 @@ hr { border: 0; border-top: var(--border); margin: var(--space-6) 0; }
   border-color: var(--ink);
 }
 
-.site-user { position: relative; margin-left: auto; }
+.site-user { position: relative; margin-left: auto; margin-right: calc(-1 * (var(--space-3) + 2px)); }
 .site-user__toggle {
   display: inline-flex;
   align-items: center;
-  min-height: 2.25rem;
+  min-height: var(--header-control);
   padding: var(--space-1) var(--space-3);
   color: var(--paper);
   border: 2px solid transparent;
@@ -722,6 +727,8 @@ legend { padding: 0 var(--space-2); font-weight: 600; }
 .table .actions .row-actions { flex-wrap: nowrap; }
 .table--data thead th { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: normal; text-transform: none; }
 .table--data td { font-family: var(--font-mono); white-space: nowrap; max-width: 28rem; overflow: hidden; text-overflow: ellipsis; }
+.table--data th.num,
+.table--data td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cell-null { color: var(--muted); font-style: italic; }
 .cell-meta { display: block; margin-top: var(--space-1); color: var(--muted); }
 .wrap-anywhere { overflow-wrap: anywhere; }
