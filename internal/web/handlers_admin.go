@@ -415,12 +415,18 @@ func (s *Server) handleAdminGroupMembers(w http.ResponseWriter, r *http.Request)
 			s.serverError(w, r, "remove member", err)
 			return
 		}
+		if err := s.store.RevokeUserSessions(ctx, userID); err != nil {
+			s.serverError(w, r, "revoke sessions", err)
+			return
+		}
+		s.redirectFlash(w, r, back, "success", "Members updated.")
+		return
 	default:
 		s.renderError(w, r, http.StatusBadRequest, "Unknown action.")
 		return
 	}
-	if err := s.store.RevokeUserSessions(ctx, userID); err != nil {
-		s.serverError(w, r, "revoke sessions", err)
+	if err := s.store.MarkUserSessionsForRotation(ctx, userID); err != nil {
+		s.serverError(w, r, "rotate sessions", err)
 		return
 	}
 	s.redirectFlash(w, r, back, "success", "Members updated.")
@@ -448,12 +454,22 @@ func (s *Server) handleAdminGroupAccess(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	previous, err := s.groupLevel(ctx, g.ID, dbID)
+	if err != nil {
+		s.serverError(w, r, "get group access", err)
+		return
+	}
 	if err := s.store.SetGroupAccess(ctx, g.ID, dbID, level); err != nil {
 		s.serverError(w, r, "set group access", err)
 		return
 	}
-	if err := s.store.RevokeGroupMembersSessions(ctx, g.ID); err != nil {
-		s.serverError(w, r, "revoke sessions", err)
+	if level > previous {
+		err = s.store.MarkGroupMembersSessionsForRotation(ctx, g.ID)
+	} else if level < previous {
+		err = s.store.RevokeGroupMembersSessions(ctx, g.ID)
+	}
+	if err != nil {
+		s.serverError(w, r, "update member sessions", err)
 		return
 	}
 	msg := "Access updated."
@@ -461,6 +477,19 @@ func (s *Server) handleAdminGroupAccess(w http.ResponseWriter, r *http.Request) 
 		msg = "Access revoked."
 	}
 	s.redirectFlash(w, r, back, "success", msg)
+}
+
+func (s *Server) groupLevel(ctx context.Context, groupID, dbID uuid.UUID) (domain.AccessLevel, error) {
+	grants, err := s.store.ListGroupAccess(ctx, groupID)
+	if err != nil {
+		return domain.LevelNone, err
+	}
+	for _, ga := range grants {
+		if ga.DBID == dbID {
+			return ga.Level, nil
+		}
+	}
+	return domain.LevelNone, nil
 }
 
 func (s *Server) handleAdminGroupDelete(w http.ResponseWriter, r *http.Request) {
