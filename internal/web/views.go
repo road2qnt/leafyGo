@@ -294,6 +294,13 @@ type historyRow struct {
 	Error          string
 }
 
+func toHistoryRow(h domain.MigrationHistory) historyRow {
+	return historyRow{
+		ID: h.ID, Version: h.Version, Status: h.Status, ExecutedByName: h.ExecutedByName,
+		StartedAt: h.StartedAt, FinishedAt: h.FinishedAt, DurationMs: h.DurationMS, Error: h.Error,
+	}
+}
+
 type historyDetail struct {
 	historyRow
 	SQL string

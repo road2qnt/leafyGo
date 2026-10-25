@@ -191,7 +191,7 @@ func TestLoginFlowAndCookieFlags(t *testing.T) {
 	}
 }
 
-func TestViewOnlyCannotReachEditStubs(t *testing.T) {
+func TestViewOnlyCannotReachEditRoutes(t *testing.T) {
 	srv, st := testServer(t)
 	ctx := context.Background()
 	seedUser(t, st, "budi", "password123", false)
@@ -211,10 +211,15 @@ func TestViewOnlyCannotReachEditStubs(t *testing.T) {
 	sid, csrf := login(t, srv, "budi", "password123")
 	base := "/databases/" + conn.ID.String()
 
-	for _, path := range []string{base + "/", base + "/schema", base + "/data", base + "/migrations"} {
-		rec := getWithSession(t, srv, path, sid)
-		if rec.Code != http.StatusNotImplemented {
-			t.Fatalf("GET %s status = %d; want 501 (passed RBAC)", path, rec.Code)
+	// Target palsu: overview tetap 200, schema dan data 502.
+	for path, want := range map[string]int{
+		base + "/":           http.StatusOK,
+		base + "/schema":     http.StatusBadGateway,
+		base + "/data":       http.StatusBadGateway,
+		base + "/migrations": http.StatusNotImplemented,
+	} {
+		if rec := getWithSession(t, srv, path, sid); rec.Code != want {
+			t.Fatalf("GET %s status = %d; want %d (passed RBAC)", path, rec.Code, want)
 		}
 	}
 

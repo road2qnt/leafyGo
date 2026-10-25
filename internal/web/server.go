@@ -148,9 +148,9 @@ func (s *Server) Handler() http.Handler {
 
 		r.Route("/databases/{id}", func(r chi.Router) {
 			// Jibril: viewer + migration
-			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.stubNotImplemented("viewer overview — Jibril"))
-			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.stubNotImplemented("viewer schema — Jibril"))
-			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.stubNotImplemented("viewer data — Jibril"))
+			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.handleOverview)
+			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.handleSchema)
+			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
 			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.stubNotImplemented("migration history — Jibril"))
 			r.With(s.requireDBAction(access.ActionManageDrafts)).Get("/migrations/new", s.stubNotImplemented("migration editor — Jibril"))
 			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations", s.stubNotImplemented("migration execute — Jibril"))
