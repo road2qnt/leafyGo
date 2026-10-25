@@ -3,6 +3,9 @@
 {{$root := .}}
 {{with .Data}}
 <div class="stack">
+  {{with .TargetError}}
+  {{template "targetError" .}}
+  {{else}}
   {{/* Error display */}}
   {{if .Error}}
   <div class="alert alert--error" role="alert">
@@ -94,6 +97,7 @@
     </div>
     {{end}}
   </div>
+  {{end}}
   {{end}}
 </div>
 {{end}}

@@ -209,3 +209,51 @@ func TestQueryBodyLimitEnforced(t *testing.T) {
 	e.srv.Handler().ServeHTTP(rec, req)
 	assertStatus(t, rec, http.StatusRequestEntityTooLarge, "oversized body returns 413")
 }
+
+func TestQueryConsoleTargetUnreachable(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+	user := seedUser(t, st, "budi", "password123", false)
+	conn := seedDBConnection(t, st, "unreachable_db")
+	group, _ := st.CreateGroup(ctx, "viewers", "")
+	_ = st.AddGroupMember(ctx, group.ID, user.ID)
+	_ = st.SetGroupAccess(ctx, group.ID, conn.ID, domain.LevelView)
+
+	sid, csrf := login(t, srv, "budi", "password123")
+	base := "/databases/" + conn.ID.String()
+
+	// 1. GET /query on unreachable DB returns 200 with targetError banner and no query editor/form
+	rec := getWithSession(t, srv, base+"/query", sid)
+	assertStatus(t, rec, http.StatusOK, "unreachable target GET /query")
+	assertBody(t, rec, "Cannot connect to the database", "shows target error alert")
+	assertBody(t, rec, "Schema, data, and SQL console are unavailable for now.", "shows updated unavailable notice")
+
+	body := rec.Body.String()
+	// Verify query form and textarea are NOT rendered
+	if strings.Contains(body, "<form class=\"form\" method=\"post\" action=\"/databases/"+conn.ID.String()+"/query\">") {
+		t.Fatal("query form should not be rendered when target is unreachable")
+	}
+	if strings.Contains(body, "id=\"query-sql\"") {
+		t.Fatal("query-sql textarea should not be rendered when target is unreachable")
+	}
+
+	// Verify tabs navigation does NOT contain Schema, Data, or SQL Console
+	if strings.Contains(body, base+"/schema") {
+		t.Fatal("navigation tabs should not contain Schema link when target is unreachable")
+	}
+	if strings.Contains(body, base+"/data") {
+		t.Fatal("navigation tabs should not contain Data link when target is unreachable")
+	}
+	if strings.Contains(body, base+"/query") {
+		t.Fatal("navigation tabs should not contain SQL Console link when target is unreachable")
+	}
+
+	// 2. POST /query on unreachable DB returns 200 with targetError banner, does not run query
+	postRec := postForm(t, srv, base+"/query", sid, csrf, url.Values{"sql": {"SELECT 1"}})
+	assertStatus(t, postRec, http.StatusOK, "unreachable target POST /query")
+	assertBody(t, postRec, "Cannot connect to the database", "shows target error alert on POST")
+	if strings.Contains(postRec.Body.String(), "id=\"query-sql\"") {
+		t.Fatal("query-sql textarea should not be rendered on POST when target is unreachable")
+	}
+}
+

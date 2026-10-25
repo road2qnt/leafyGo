@@ -422,6 +422,9 @@ func previewGroups() []previewGroup {
 			{"viewer-data-failed", "Data, target unreachable", "viewer/data.html", func() pageData {
 				return downPage(dbPage("Data", navDBData, fxArsip, fxAndi, domain.LevelView, dataView{TargetError: fxTargetError}))
 			}},
+			{"viewer-query-failed", "SQL Console, target unreachable", "query/console.html", func() pageData {
+				return downPage(dbPage("SQL Console", navDBQuery, fxArsip, fxAndi, domain.LevelView, queryConsoleView{TargetError: fxTargetError}))
+			}},
 			{"viewer-schema", "Schema, table list", "viewer/schema.html", func() pageData {
 				return dbPage("Schema", navDBSchema, fxToko, fxAndi, domain.LevelView, schemaView{Tables: fxTables()})
 			}},

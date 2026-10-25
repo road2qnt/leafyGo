@@ -16,9 +16,16 @@ func (s *Server) dbPageData(r *http.Request, title, nav string, data any) pageDa
 	return pageData{Title: title + " · " + db.Name, Nav: nav, DB: db, Level: currentLevel(r), TargetDown: !s.targetReachable(r), Data: data}
 }
 
-func (s *Server) targetReachable(r *http.Request) bool {
+func (s *Server) checkTarget(r *http.Request) error {
 	pool, err := s.targetPool(r)
-	return err == nil && pool.Ping(r.Context()) == nil
+	if err != nil {
+		return err
+	}
+	return pool.Ping(r.Context())
+}
+
+func (s *Server) targetReachable(r *http.Request) bool {
+	return s.checkTarget(r) == nil
 }
 
 func targetErrorText(err error) string {

@@ -45,8 +45,8 @@
     {{if not .TargetDown}}
     <li><a href="/databases/{{.DB.ID}}/schema"{{if eq .Nav "db-schema"}} aria-current="page"{{end}}>Schema</a></li>
     <li><a href="/databases/{{.DB.ID}}/data"{{if eq .Nav "db-data"}} aria-current="page"{{end}}>Data</a></li>
-    {{end}}
     <li><a href="/databases/{{.DB.ID}}/query"{{if eq .Nav "db-query"}} aria-current="page"{{end}}>SQL Console</a></li>
+    {{end}}
     <li><a href="/databases/{{.DB.ID}}/migrations"{{if eq .Nav "db-migrations"}} aria-current="page"{{end}}>Migration history</a></li>
     {{if .Level.CanEdit}}<li><a href="/databases/{{.DB.ID}}/migrations/drafts"{{if eq .Nav "db-drafts"}} aria-current="page"{{end}}>Drafts</a></li>{{end}}
   </ul>
@@ -92,7 +92,7 @@
   <div>
     <p class="alert__title">Cannot connect to the database</p>
     <p>{{.}}</p>
-    <p class="text-sm">Schema and data are unavailable for now. Migration history is still available.</p>
+    <p class="text-sm">Schema, data, and SQL console are unavailable for now. Migration history is still available.</p>
   </div>
 </div>
 {{end}}

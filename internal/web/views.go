@@ -294,6 +294,7 @@ type queryConsoleView struct {
 	SQLErrorLine     int
 	IsWriteRejection bool
 	Notice           string
+	TargetError      string
 }
 
 // Migration

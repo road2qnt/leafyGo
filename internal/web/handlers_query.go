@@ -16,12 +16,26 @@ func (s *Server) queryBodyLimit(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) renderQueryDown(w http.ResponseWriter, r *http.Request, err error) {
+	s.logTargetError(r, err)
+	s.render(w, r, http.StatusOK, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, queryConsoleView{TargetError: targetErrorText(err)}))
+}
+
 func (s *Server) handleQueryConsoleGet(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkTarget(r); err != nil {
+		s.renderQueryDown(w, r, err)
+		return
+	}
 	v := queryConsoleView{}
 	s.render(w, r, http.StatusOK, "query/console.html", s.dbPageData(r, "SQL Console", navDBQuery, v))
 }
 
 func (s *Server) handleQueryConsolePost(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkTarget(r); err != nil {
+		s.renderQueryDown(w, r, err)
+		return
+	}
+
 	sql := strings.ReplaceAll(r.FormValue("sql"), "\r\n", "\n")
 	user := currentUser(r)
 	db := currentDB(r)
@@ -40,6 +54,11 @@ func (s *Server) handleQueryConsolePost(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err != nil {
+		if !s.targetReachable(r) {
+			s.renderQueryDown(w, r, err)
+			return
+		}
+
 		status := http.StatusUnprocessableEntity
 		var tgtErr *queryconsole.TargetError
 		switch {
