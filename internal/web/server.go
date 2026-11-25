@@ -27,10 +27,14 @@ import (
 	"leafygo/internal/secret"
 	"leafygo/internal/store"
 	"leafygo/internal/target"
+	"leafygo/internal/telemetry"
 )
 
 //go:embed templates/*.html templates/pages/*/*.html templates/partials/*.html static/*
 var assets embed.FS
+
+//go:embed all:dist
+var spaAssets embed.FS
 
 type Server struct {
 	cfg        config.Config
@@ -43,6 +47,8 @@ type Server struct {
 	targets    *target.Manager
 	migrations *migration.Service
 	queries    *queryconsole.Service
+
+	metricsHandler http.Handler
 }
 
 // cfg.EncryptionKey sudah divalidasi config.Load.
@@ -94,6 +100,20 @@ func New(cfg config.Config, st *store.Store, sessions *auth.Manager, policy *acc
 
 func (s *Server) Close() { s.targets.Close() }
 
+// TargetPools exposes live target pools for Prometheus collection.
+func (s *Server) TargetPools() []target.PoolSnapshot {
+	if s.targets == nil {
+		return nil
+	}
+	return s.targets.Snapshots()
+}
+
+// SetMetricsHandler mounts the Prometheus scrape endpoint. The handler is
+// public (outside the session guard) so Prometheus can scrape it.
+func (s *Server) SetMetricsHandler(handler http.Handler) {
+	s.metricsHandler = handler
+}
+
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -101,7 +121,12 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'")
+		// CodeMirror and React set inline style attributes; scripts stay strict.
+		if strings.HasPrefix(r.URL.Path, "/app") {
+			h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
+		} else {
+			h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -109,9 +134,14 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	// Telemetry wraps Recoverer so a panic still produces a 500 span/log.
+	r.Use(telemetryMiddleware(s.logger))
 	r.Use(middleware.Recoverer)
 	r.Use(s.securityHeaders)
-	r.Use(s.logRequests)
+
+	if s.metricsHandler != nil {
+		r.Method(http.MethodGet, "/metrics", s.metricsHandler)
+	}
 
 	staticFS, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -123,9 +153,17 @@ func (s *Server) Handler() http.Handler {
 		staticHandler.ServeHTTP(w, req)
 	}))
 
+	s.mountSPA(r)
+
 	if s.cfg.UIPreview {
 		r.Get("/_preview", s.handlePreviewIndex)
 		r.Get("/_preview/{key}", s.handlePreview)
+	}
+
+	if s.cfg.SPARoot {
+		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, "/app/", http.StatusPermanentRedirect)
+		})
 	}
 
 	r.Get("/login", s.handleLoginGet)
@@ -136,7 +174,9 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.csrfProtect)
 
 		r.Post("/logout", s.handleLogout)
-		r.Get("/", s.handleDashboard)
+		if !s.cfg.SPARoot {
+			r.Get("/", s.handleDashboard)
+		}
 
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.requirePlatformAdmin)
@@ -250,7 +290,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			s.redirectToLogin(w, r)
 			return
 		}
-		ctx := context.WithValue(r.Context(), sessionKey, &sess)
+		actor := "user:" + user.Username
+		ctx := telemetry.WithActor(r.Context(), actor)
+		if info := requestInfoFrom(ctx); info != nil {
+			info.Actor = actor
+		}
+		ctx = context.WithValue(ctx, sessionKey, &sess)
 		ctx = context.WithValue(ctx, userKey, &user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -359,6 +404,11 @@ func (s *Server) requireDBAction(action access.Action) func(http.Handler) http.H
 			}
 			ctx := context.WithValue(r.Context(), dbKey, &conn)
 			ctx = context.WithValue(ctx, levelKey, level)
+			ctx = telemetry.WithDatabase(ctx, id.String(), conn.Name)
+			if info := requestInfoFrom(ctx); info != nil {
+				info.DBID = id.String()
+				info.DBName = conn.Name
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -369,11 +419,11 @@ func (s *Server) auditDenied(r *http.Request, action, target string) {
 	if user := currentUser(r); user != nil {
 		actorID = user.ID.String()
 	}
-	s.logger.Warn("access denied",
+	s.logger.WarnContext(r.Context(), "access.denied",
 		"actor_id", actorID,
 		"target_id", target,
 		"action", action,
-		"result", "forbidden",
+		"status", "forbidden",
 	)
 }
 

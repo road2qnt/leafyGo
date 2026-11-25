@@ -35,6 +35,76 @@ func baseEnv(t *testing.T) {
 	withEnv(t, "QUERY_MAX_CELL_BYTES", "")
 	withEnv(t, "QUERY_MAX_RESULT_BYTES", "")
 	withEnv(t, "QUERY_MAX_CONCURRENT", "")
+	withEnv(t, "OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	withEnv(t, "OTEL_TRACES_CONSOLE", "")
+	withEnv(t, "OTEL_TRACES_SAMPLE_RATIO", "")
+	withEnv(t, "METRICS_ENABLED", "")
+	withEnv(t, "SPA_ROOT", "")
+}
+
+func TestLoadTelemetryDefaults(t *testing.T) {
+	baseEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OTLPEndpoint != "" {
+		t.Fatalf("OTLPEndpoint = %q", cfg.OTLPEndpoint)
+	}
+	if !cfg.OTELConsole {
+		t.Fatal("console span exporter should default to enabled outside production")
+	}
+	if cfg.OTELSampleRatio != 1 {
+		t.Fatalf("OTELSampleRatio = %v", cfg.OTELSampleRatio)
+	}
+	if !cfg.MetricsEnabled {
+		t.Fatal("metrics should default to enabled")
+	}
+	if cfg.SPARoot {
+		t.Fatal("SPA_ROOT should default to false until the JSON API lands")
+	}
+}
+
+func TestLoadTelemetryOverrides(t *testing.T) {
+	baseEnv(t)
+	withEnv(t, "APP_ENV", "production")
+	withEnv(t, "OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector:4318")
+	withEnv(t, "OTEL_TRACES_CONSOLE", "false")
+	withEnv(t, "OTEL_TRACES_SAMPLE_RATIO", "0.25")
+	withEnv(t, "METRICS_ENABLED", "false")
+	withEnv(t, "SPA_ROOT", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OTLPEndpoint != "otel-collector:4318" {
+		t.Fatalf("OTLPEndpoint = %q", cfg.OTLPEndpoint)
+	}
+	if cfg.OTELConsole {
+		t.Fatal("console exporter should be disabled")
+	}
+	if cfg.OTELSampleRatio != 0.25 {
+		t.Fatalf("OTELSampleRatio = %v", cfg.OTELSampleRatio)
+	}
+	if cfg.MetricsEnabled {
+		t.Fatal("metrics should be disabled")
+	}
+	if !cfg.SPARoot {
+		t.Fatal("SPA_ROOT override not applied")
+	}
+}
+
+func TestLoadTelemetryRejectsInvalidRatio(t *testing.T) {
+	for _, value := range []string{"1.5", "-0.1", "abc"} {
+		baseEnv(t)
+		withEnv(t, "OTEL_TRACES_SAMPLE_RATIO", value)
+		if _, err := Load(); err == nil {
+			t.Fatalf("expected error for OTEL_TRACES_SAMPLE_RATIO=%s", value)
+		} else if !strings.Contains(err.Error(), "OTEL_TRACES_SAMPLE_RATIO") {
+			t.Fatalf("error %q does not mention OTEL_TRACES_SAMPLE_RATIO", err)
+		}
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {

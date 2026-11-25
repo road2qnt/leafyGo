@@ -57,6 +57,14 @@ func (o *Options) applyDefaults() {
 type poolEntry struct {
 	pool      *pgxpool.Pool
 	updatedAt time.Time
+	name      string
+}
+
+// PoolSnapshot is a read-only view of one live target pool.
+type PoolSnapshot struct {
+	ID   uuid.UUID
+	Name string
+	Pool *pgxpool.Pool
 }
 
 type Manager struct {
@@ -138,6 +146,7 @@ func (m *Manager) Pool(ctx context.Context, db domain.DBConnection) (*pgxpool.Po
 		m.pools[db.ID] = &poolEntry{
 			pool:      p,
 			updatedAt: db.UpdatedAt,
+			name:      db.Name,
 		}
 		m.mu.Unlock()
 
@@ -350,6 +359,21 @@ func (m *Manager) Test(ctx context.Context, db domain.DBConnection) error {
 	}
 
 	return nil
+}
+
+// Snapshots returns the currently cached target pools for metrics collection.
+// It never creates a pool.
+func (m *Manager) Snapshots() []PoolSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]PoolSnapshot, 0, len(m.pools))
+	for id, entry := range m.pools {
+		if entry == nil || entry.pool == nil {
+			continue
+		}
+		out = append(out, PoolSnapshot{ID: id, Name: entry.name, Pool: entry.pool})
+	}
+	return out
 }
 
 func (m *Manager) Invalidate(dbID uuid.UUID) {

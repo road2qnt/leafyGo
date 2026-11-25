@@ -42,6 +42,12 @@ type Config struct {
 	QueryMaxCellBytes   int64
 	QueryMaxResultBytes int64
 	QueryMaxConcurrent  int
+
+	OTLPEndpoint    string
+	OTELConsole     bool
+	OTELSampleRatio float64
+	MetricsEnabled  bool
+	SPARoot         bool
 }
 
 func Load() (Config, error) {
@@ -132,6 +138,20 @@ func Load() (Config, error) {
 		return Config{}, errors.New("UI_PREVIEW must not be enabled in production")
 	}
 
+	cfg.OTLPEndpoint = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if cfg.OTELConsole, err = boolEnv("OTEL_TRACES_CONSOLE", cfg.AppEnv != "production"); err != nil {
+		return Config{}, err
+	}
+	if cfg.OTELSampleRatio, err = ratioEnv("OTEL_TRACES_SAMPLE_RATIO", 1); err != nil {
+		return Config{}, err
+	}
+	if cfg.MetricsEnabled, err = boolEnv("METRICS_ENABLED", true); err != nil {
+		return Config{}, err
+	}
+	if cfg.SPARoot, err = boolEnv("SPA_ROOT", false); err != nil {
+		return Config{}, err
+	}
+
 	key, err := decodeKey(os.Getenv("ENCRYPTION_KEY"))
 	if err != nil {
 		return Config{}, err
@@ -171,6 +191,21 @@ func boolEnv(key string, fallback bool) (bool, error) {
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
 		return false, fmt.Errorf("%s must be true or false: %w", key, err)
+	}
+	return v, nil
+}
+
+func ratioEnv(key string, fallback float64) (float64, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number between 0 and 1: %w", key, err)
+	}
+	if v < 0 || v > 1 {
+		return 0, fmt.Errorf("%s must be between 0 and 1", key)
 	}
 	return v, nil
 }

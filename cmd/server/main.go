@@ -16,8 +16,11 @@ import (
 	"leafygo/internal/platform"
 	"leafygo/internal/seed"
 	"leafygo/internal/store"
+	"leafygo/internal/telemetry"
 	"leafygo/internal/web"
 )
+
+const serviceVersion = "m2-ega"
 
 func main() {
 	if err := run(); err != nil {
@@ -31,11 +34,37 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := telemetry.NewLogger(telemetry.LoggerOptions{
+		Service: "leafygo-api",
+		Env:     cfg.AppEnv,
+		Version: serviceVersion,
+		Level:   slog.LevelInfo,
+	})
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	tracer, err := telemetry.NewTracerProvider(ctx, telemetry.TracerOptions{
+		ServiceName:    "leafygo-api",
+		ServiceVersion: serviceVersion,
+		Env:            cfg.AppEnv,
+		Console:        cfg.OTELConsole,
+		OTLPEndpoint:   cfg.OTLPEndpoint,
+		SampleRatio:    cfg.OTELSampleRatio,
+	})
+	if err != nil {
+		logger.Warn("telemetry.tracing.disabled", "error", err)
+	} else {
+		tracer.Install()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := tracer.Shutdown(shutdownCtx); err != nil {
+				logger.Warn("telemetry.tracing.shutdown_failed", "error", err)
+			}
+		}()
+	}
 
 	if err := platform.Migrate(ctx, cfg.DatabaseURL); err != nil {
 		return err
@@ -66,6 +95,30 @@ func run() error {
 
 	srv := web.New(cfg, st, sessionManager, policy, logger)
 	defer srv.Close()
+	if cfg.MetricsEnabled {
+		metrics := telemetry.NewMetrics(telemetry.MetricsOptions{
+			JobCounts: telemetry.PlatformJobCountSource(pool),
+			Logger:    logger,
+		})
+		metrics.RegisterPool(telemetry.PgxPoolSource{Pool: pool, Role: "platform", Name: "platform"})
+		metrics.RegisterPoolGroup(func() []telemetry.PoolStatsSource {
+			snapshots := srv.TargetPools()
+			sources := make([]telemetry.PoolStatsSource, 0, len(snapshots))
+			for _, snapshot := range snapshots {
+				name := snapshot.Name
+				if name == "" {
+					name = snapshot.ID.String()
+				}
+				sources = append(sources, telemetry.PgxPoolSource{
+					Pool: snapshot.Pool,
+					Role: "target",
+					Name: name,
+				})
+			}
+			return sources
+		})
+		srv.SetMetricsHandler(metrics.Handler())
+	}
 	handler := srv.Handler()
 	server := &http.Server{
 		Addr:              cfg.Addr,
