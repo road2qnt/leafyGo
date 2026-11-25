@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/plex-sans-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/plex-sans-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/plex-sans-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/plex-sans-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/plex-sans-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-600.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-paper: #f5f4ee;
+  --color-surface: #fffef9;
+  --color-ink: #16211a;
+  --color-muted: #5f6d63;
+  --color-line: #dcdcd1;
+
+  --color-leaf-50: #eff6f1;
+  --color-leaf-100: #dcecdf;
+  --color-leaf-200: #bbd9c2;
+  --color-leaf-300: #91bf9d;
+  --color-leaf-400: #62a176;
+  --color-leaf-500: #3f8258;
+  --color-leaf-600: #2d6745;
+  --color-leaf-700: #235237;
+  --color-leaf-800: #1c412c;
+  --color-leaf-900: #13251c;
+
+  --color-lime: #d9f37b;
+  --color-clay: #b4552d;
+  --color-gold: #b38327;
+  --color-plum: #6d4b8f;
+  --color-ocean: #2f6f8f;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+  }
+  ::selection {
+    background: var(--color-lime);
+    color: var(--color-leaf-900);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-leaf-500);
+    outline-offset: 2px;
+  }
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .card {
+    @apply min-w-0 rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(21,32,25,0.05)];
+  }
+  .card-hover {
+    @apply transition hover:-translate-y-0.5 hover:border-leaf-300 hover:shadow-[0_10px_30px_-18px_rgba(21,32,25,0.45)];
+  }
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-transparent px-3.5 py-2 text-sm font-medium transition select-none disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-leaf-700 text-white hover:bg-leaf-800 active:bg-leaf-900;
+  }
+  .btn-secondary {
+    @apply border-line bg-surface text-ink hover:border-leaf-300 hover:bg-leaf-50;
+  }
+  .btn-ghost {
+    @apply text-muted hover:bg-leaf-50 hover:text-ink;
+  }
+  .btn-danger {
+    @apply bg-[#a33a2b] text-white hover:bg-[#8c2f23];
+  }
+  .btn-lime {
+    @apply bg-lime text-leaf-900 hover:bg-[#cbe86a];
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .btn-icon {
+    @apply h-9 w-9 p-0;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink outline-none transition placeholder:text-muted/60 focus:border-leaf-400 focus:ring-2 focus:ring-leaf-200;
+  }
+  .input-mono {
+    @apply font-mono text-[13px];
+  }
+  .label {
+    @apply mb-1.5 block text-[11px] font-semibold tracking-[0.13em] text-muted uppercase;
+  }
+  .hint {
+    @apply text-xs leading-relaxed text-muted;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tracking-wide whitespace-nowrap;
+  }
+  .badge-neutral {
+    @apply border-line bg-[#f1f0e9] text-muted;
+  }
+  .badge-success {
+    @apply border-leaf-200 bg-leaf-50 text-leaf-700;
+  }
+  .badge-warning {
+    @apply border-[#ead9ab] bg-[#fbf4dd] text-[#7a5a12];
+  }
+  .badge-danger {
+    @apply border-[#e9c3b9] bg-[#fbebe6] text-[#8b3323];
+  }
+  .badge-info {
+    @apply border-[#bdd8e4] bg-[#edf6fa] text-[#245b75];
+  }
+  .badge-plum {
+    @apply border-[#d5c6e6] bg-[#f4eefa] text-[#5c3d7f];
+  }
+  .table-wrap {
+    @apply min-w-0 w-full max-w-full overflow-x-auto rounded-xl border border-line bg-surface;
+  }
+  .table-base {
+    @apply w-full border-collapse text-left text-sm;
+  }
+  .th {
+    @apply sticky top-0 z-10 border-b border-line bg-[#f1f0e8] px-4 py-2.5 text-[11px] font-semibold tracking-[0.1em] text-muted uppercase whitespace-nowrap;
+  }
+  .td {
+    @apply border-b border-line/70 px-4 py-3 align-middle;
+  }
+  .tr-hover {
+    @apply transition hover:bg-leaf-50/60;
+  }
+  .tabs {
+    @apply flex gap-1 overflow-x-auto border-b border-line pb-px;
+  }
+  .tab {
+    @apply shrink-0 rounded-t-lg border-b-2 border-transparent px-3.5 py-2 text-sm font-medium text-muted transition hover:bg-leaf-50 hover:text-ink;
+  }
+  .tab-active {
+    @apply border-leaf-600 bg-leaf-50/70 text-leaf-800;
+  }
+  .sqlbox {
+    @apply min-w-0 max-w-full overflow-hidden rounded-xl border border-line bg-white;
+  }
+  .kbd {
+    @apply rounded border border-line bg-white px-1.5 py-0.5 font-mono text-[10px] text-muted;
+  }
+  .tag-optional {
+    @apply inline-flex items-center rounded-md border border-dashed border-[#c9a7d8] bg-[#faf5fc] px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-[#6d4b8f] uppercase;
+  }
+  .skeleton {
+    @apply animate-pulse rounded-md bg-[#e9e8df];
+  }
+  .stat-value {
+    @apply mt-1 font-sans text-2xl font-semibold tracking-tight text-ink;
+  }
+  .stat-label {
+    @apply text-[11px] font-semibold tracking-[0.13em] text-muted uppercase;
+  }
+  .section-title {
+    @apply text-[11px] font-semibold tracking-[0.16em] text-muted uppercase;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #c9c9bd transparent;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+}
