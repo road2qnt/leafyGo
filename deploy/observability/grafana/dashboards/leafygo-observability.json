@@ -1,0 +1,164 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Migration jobs by status",
+      "description": "Server-only gauge: leafygo_migration_jobs_current.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "leafygo_migration_jobs_current{db_name=~\"$db_name\"}",
+          "legendFormat": "{{status}} · {{db_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 12, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue wait time (p50 / p95 / p99)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "p50", "expr": "histogram_quantile(0.50, sum by (le) (rate(leafygo_migration_queue_wait_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(leafygo_migration_queue_wait_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p95" },
+        { "refId": "p99", "expr": "histogram_quantile(0.99, sum by (le) (rate(leafygo_migration_queue_wait_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lock wait time (p50 / p95 / p99)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "p50", "expr": "histogram_quantile(0.50, sum by (le) (rate(leafygo_migration_lock_wait_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(leafygo_migration_lock_wait_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p95" },
+        { "refId": "p99", "expr": "histogram_quantile(0.99, sum by (le) (rate(leafygo_migration_lock_wait_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Execution duration (p95) and throughput",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "duration", "expr": "histogram_quantile(0.95, sum by (le, action) (rate(leafygo_migration_execution_duration_seconds_bucket{db_name=~\"$db_name\"}[5m])))", "legendFormat": "p95 {{action}}" },
+        { "refId": "batches", "expr": "sum by (db_name) (rate(leafygo_migration_batches_processed_total{db_name=~\"$db_name\"}[5m]))", "legendFormat": "batches/s {{db_name}}" },
+        { "refId": "rows", "expr": "sum by (db_name) (rate(leafygo_migration_rows_processed_total{db_name=~\"$db_name\"}[5m]))", "legendFormat": "rows/s {{db_name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Retry rate per database",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (db_name) (rate(leafygo_migration_job_retries_total{db_name=~\"$db_name\"}[5m]))", "legendFormat": "{{db_name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Database connection pool: active vs idle",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "leafygo_db_pool_connections{state=~\"active|idle\", db_name=~\"$db_name\"}", "legendFormat": "{{state}} · {{db_name}} · {{pool_role}}" },
+        { "refId": "B", "expr": "leafygo_db_pool_connections{state=\"max\", db_name=~\"$db_name\"}", "legendFormat": "max · {{db_name}} · {{pool_role}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool wait time (rate) and empty acquisitions",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (db_name) (rate(leafygo_db_pool_wait_duration_seconds_total{db_name=~\"$db_name\"}[5m]))", "legendFormat": "wait s/s · {{db_name}}" },
+        { "refId": "B", "expr": "sum by (db_name) (rate(leafygo_db_pool_wait_count_total{db_name=~\"$db_name\"}[5m]))", "legendFormat": "waits/s · {{db_name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 }
+    },
+    {
+      "type": "logs",
+      "title": "Structured activity and SQL logs (Loki)",
+      "description": "JSON logs from log/slog. Click TraceID to open the Tempo waterfall.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"leafygo-docker-logs\"} | json | event=~\"sql\\..*|http\\.request|access\\.denied|migration\\..*\"",
+          "queryType": "range"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 24 }
+    },
+    {
+      "type": "traces",
+      "title": "Distributed traces (Tempo)",
+      "description": "API -> Queue -> Worker -> Lock -> Revalidation -> Target DB.",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        { "refId": "A", "queryType": "traceql", "query": "{ resource.service.name = \"leafygo-api\" }" }
+      ],
+      "options": { "search": { "layout": "table" } },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 32 }
+    },
+    {
+      "type": "text",
+      "title": "How to read this board",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "mode": "markdown",
+        "content": "### Correlation workflow\n\n1. Pick a `trace_id` in the Loki panel (or click **TraceID**).\n2. Tempo opens the `HTTP -> queue.publish -> worker.process_job -> worker.execute_batch -> target.db.query` waterfall.\n3. `leafygo_migration_jobs_current` is emitted by **cmd/server only**; worker replicas contribute counters/histograms and their own pool stats.\n\nMetrics: `/metrics` on `app:8080` and `worker:8081`. Logs are JSON on stdout and are collected by the OTel Collector via the Docker filelog receiver."
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 32 }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["leafygo", "milestone-2", "observability"],
+  "templating": {
+    "list": [
+      {
+        "name": "db_name",
+        "label": "Database",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(leafygo_migration_jobs_current, db_name)", "refId": "StandardVariableQuery" },
+        "definition": "label_values(leafygo_migration_jobs_current, db_name)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "LeafyGo — Migration Queue & Observability",
+  "uid": "leafygo-observability",
+  "version": 1
+}
