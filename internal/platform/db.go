@@ -53,6 +53,11 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	defer conn.Close(ctx)
 
+	// Server and worker processes may start together and race to apply the same migration.
+	if _, err := conn.Exec(ctx, `select pg_advisory_lock(hashtextextended('leafygo_platform_migrate', 0))`); err != nil {
+		return fmt.Errorf("platform: acquire migrate lock: %w", err)
+	}
+
 	if _, err := conn.Exec(ctx, `create table if not exists schema_migrations (
 		version integer primary key,
 		applied_at timestamptz not null default now()
