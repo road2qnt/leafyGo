@@ -331,7 +331,7 @@ func (s *Server) handleAPIProposalApprove(w http.ResponseWriter, r *http.Request
 		"enqueued":       res.Enqueued,
 	}
 	if res.Enqueued && res.Job != nil && res.Execution != nil {
-		resp["job_id"] = res.Job.JobID
+		resp["job_id"] = res.Job.ID
 		resp["execution_id"] = res.Execution.ExecutionID
 		resp["root_execution_id"] = res.Execution.RootExecutionID
 		resp["job"] = res.Job

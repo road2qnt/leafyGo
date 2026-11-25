@@ -371,8 +371,7 @@ func (s *Store) GetDatabaseLock(ctx context.Context, dbID uuid.UUID) (*domain.DB
 		return nil, fmt.Errorf("get database_migration_locks: %w", err)
 	}
 	if prevState.Valid {
-		s := prevState.String
-		lock.PreviousLockState = &s
+		lock.PreviousLockState = prevState.String
 	}
 	if nextProbe.Valid {
 		t := nextProbe.Time

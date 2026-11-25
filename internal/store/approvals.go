@@ -15,20 +15,6 @@ import (
 	"leafygo/internal/domain"
 )
 
-// EnqueueInput defines the contract with Person 2 for atomic job queueing inside the last-leader approval transaction.
-type EnqueueInput struct {
-	DBID            uuid.UUID
-	ProposalID      uuid.UUID
-	MigrationID     uuid.UUID
-	ExecutionID     uuid.UUID
-	RootExecutionID uuid.UUID
-	ActionType      string
-	ExecutionMode   string
-	TraceParent     string
-	TraceState      string
-	CorrelationID   string
-}
-
 type SubmitProposalInput struct {
 	ID                uuid.UUID
 	DBID              uuid.UUID
@@ -855,102 +841,6 @@ func (s *Store) resolveExecutionLineageTx(
 	}
 }
 
-// EnqueueMigrationJobTx inserts a queued row into migration_jobs (allocating queue_seq BIGSERIAL,
-// inheriting cursor scope for batch_retry/batch_revert/batch-rollback on the same root_execution_id)
-// and sends NOTIFY migration_jobs_channel within the same transaction.
-func (s *Store) EnqueueMigrationJobTx(ctx context.Context, tx pgx.Tx, in EnqueueInput) (domain.MigrationJob, error) {
-	jobID := uuid.New()
-
-	var lastCursor, scopeMinCursor, scopeMaxCursor pgtype.Int8
-	totalBatches := 1
-	completedBatches := 0
-	var committedRows int64
-
-	// Retry Scope Inheritance for batch_retry, batch_revert, and batch-mode rollback
-	if in.ActionType == domain.ActionBatchRetry || in.ActionType == domain.ActionBatchRevert ||
-		(in.ActionType == domain.ActionRollback && in.ExecutionMode == domain.ExecutionModeBatch) {
-		err := tx.QueryRow(ctx, `
-			select j.last_cursor, j.scope_min_cursor, j.scope_max_cursor,
-			       j.total_batches, j.completed_batches, j.committed_rows
-			from migration_jobs j
-			join migration_executions e on e.execution_id = j.execution_id
-			where e.root_execution_id = $1
-			order by j.queue_seq desc
-			limit 1`, in.RootExecutionID).
-			Scan(&lastCursor, &scopeMinCursor, &scopeMaxCursor, &totalBatches, &completedBatches, &committedRows)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return domain.MigrationJob{}, fmt.Errorf("inherit batch retry scope: %w", err)
-		}
-	}
-
-	var queueSeq int64
-	var nextRunAt, queuedAt, updatedAt time.Time
-	err := tx.QueryRow(ctx, `
-		insert into migration_jobs (
-			job_id, db_id, proposal_id, migration_id, execution_id,
-			action_type, execution_mode, status,
-			last_cursor, scope_min_cursor, scope_max_cursor,
-			total_batches, completed_batches, committed_rows,
-			trace_parent, trace_state, correlation_id
-		) values (
-			$1, $2, $3, $4, $5,
-			$6, $7, 'queued',
-			$8, $9, $10,
-			$11, $12, $13,
-			$14, $15, $16
-		)
-		returning queue_seq, next_run_at, queued_at, updated_at`,
-		jobID, in.DBID, in.ProposalID, in.MigrationID, in.ExecutionID,
-		in.ActionType, in.ExecutionMode,
-		lastCursor, scopeMinCursor, scopeMaxCursor,
-		totalBatches, completedBatches, committedRows,
-		in.TraceParent, in.TraceState, in.CorrelationID,
-	).Scan(&queueSeq, &nextRunAt, &queuedAt, &updatedAt)
-	if err != nil {
-		return domain.MigrationJob{}, fmt.Errorf("insert migration_jobs: %w", mapWriteError(err))
-	}
-
-	if _, err := tx.Exec(ctx, `select pg_notify('migration_jobs_channel', $1)`, jobID.String()); err != nil {
-		return domain.MigrationJob{}, fmt.Errorf("notify migration_jobs_channel: %w", err)
-	}
-
-	job := domain.MigrationJob{
-		JobID:            jobID,
-		QueueSeq:         queueSeq,
-		DBID:             in.DBID,
-		ProposalID:       in.ProposalID,
-		MigrationID:      in.MigrationID,
-		ExecutionID:      in.ExecutionID,
-		ActionType:       in.ActionType,
-		ExecutionMode:    in.ExecutionMode,
-		Status:           domain.StatusQueued,
-		RetryCount:       0,
-		MaxRetries:       3,
-		NextRunAt:        nextRunAt,
-		TotalBatches:     totalBatches,
-		CompletedBatches: completedBatches,
-		CommittedRows:    committedRows,
-		TraceParent:      in.TraceParent,
-		TraceState:       in.TraceState,
-		CorrelationID:    in.CorrelationID,
-		QueuedAt:         queuedAt,
-		UpdatedAt:        updatedAt,
-	}
-	if lastCursor.Valid {
-		v := lastCursor.Int64
-		job.LastCursor = &v
-	}
-	if scopeMinCursor.Valid {
-		v := scopeMinCursor.Int64
-		job.ScopeMinCursor = &v
-	}
-	if scopeMaxCursor.Valid {
-		v := scopeMaxCursor.Int64
-		job.ScopeMaxCursor = &v
-	}
-	return job, nil
-}
-
 // ApproveProposal records an 'approved' decision for the group(s) led by in.Actor, evaluates
 // the quorum intersection (Snapshot ∩ CurrentActiveDBGroups), enforces the Predecessor Approval Gate
 // (409 PREDECESSOR_NOT_READY), and atomically enqueues the migration execution & job when the final
@@ -1185,4 +1075,3 @@ func (s *Store) ApproveProposal(ctx context.Context, in ApproveProposalInput) (A
 		Job:           &job,
 	}, nil
 }
-
