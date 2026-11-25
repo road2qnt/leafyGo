@@ -2,3 +2,10 @@
 *.test
 /bin/
 /server
+
+# Superpowers execution workspace
+.superpowers/
+
+# SPA dependencies
+web/node_modules/
+web/.vite/

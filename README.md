@@ -13,6 +13,74 @@ IF3110 Milestone 1: Database Management Platform.
 - Migration editor dengan draft, EXPLAIN, eksekusi dalam satu transaksi, dan riwayat linear.
 - Bonus: EXPLAIN.
 
+## Milestone 2 — SPA, observability, dan tracing (bagian Ega)
+
+- **SPA responsif** React 19 + TypeScript + Vite + Tailwind CSS v4 + TanStack
+  Query + React Router, di-embed ke binary Go dan disajikan di
+  <http://localhost:8080/app/>. UI template M1 tetap di `/` selama JSON API M2
+  belum selesai.
+- **Structured logging** JSON `log/slog` dengan `trace_id`/`span_id`/
+  `correlation_id`, redaksi kredensial, dan kebijakan SQL per sumber
+  (`platform`, `target_viewer`, `query_console`, `dry_run`, `migration`).
+- **OpenTelemetry tracing** console + OTLP/HTTP, propagasi W3C
+  `traceparent`/`tracestate` dari API → queue → worker → target DB.
+- **Prometheus `/metrics`** untuk queue/migration, `pgxpool`, dan gauge
+  `jobs_current` khusus `cmd/server`.
+- **Bonus observability stack** (OTel Collector, Prometheus, Tempo, Loki,
+  Grafana) dengan versi pinned dan dashboard siap pakai.
+
+Detail serah-terima API untuk P1/P2: [docs/m2-spa-api-contract.md](docs/m2-spa-api-contract.md).
+Rencana kerja: [docs/m2-ega-workplan.md](docs/m2-ega-workplan.md).
+
+### Menjalankan SPA
+
+```bash
+make web-install
+make web-dev          # http://localhost:5173/app/ dengan proxy /api/v1 ke :8080
+```
+
+Demo tanpa backend M2 (mock API di browser):
+
+```bash
+make web-build
+go run ./cmd/server
+# buka http://localhost:8080/app/?mock=1
+```
+
+Mode mock juga aktif pada build khusus dengan `VITE_USE_MOCKS=true`; build
+default selalu memanggil `/api/v1` sungguhan. Flag `?mock=1` disimpan di
+localStorage; `?mock=0` mematikannya. Login sebagai `putra` untuk approval
+terakhir proposal Inventory; login sebagai `jibril` untuk melihat
+`409 PREDECESSOR_NOT_READY` pada People Ops.
+
+Akun demo: `jibril`, `putra`, `ega` dengan password `password123`; `admin`
+dengan password `admin12345`.
+
+Build ulang SPA setelah mengubah `web/`:
+
+```bash
+make web-build        # hasil ke internal/web/dist, ikut ter-embed ke Go
+```
+
+### Telemetry & metrics
+
+| Env | Default | Fungsi |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | mis. `otel-collector:4318`; kosong = hanya console |
+| `OTEL_TRACES_CONSOLE` | true di non-production | cetak span JSON ke stdout |
+| `OTEL_TRACES_SAMPLE_RATIO` | `1` | rasio sampling 0–1 |
+| `METRICS_ENABLED` | `true` | endpoint `/metrics` |
+| `SPA_ROOT` | `false` | `true` = `/` redirect ke `/app/` |
+
+Jalankan stack observability (setelah `docker compose up -d`):
+
+```bash
+make obs-up
+# Grafana http://localhost:3000, Prometheus http://localhost:9090
+```
+
+Panduan lengkap: [deploy/observability/README.md](deploy/observability/README.md).
+
 ## Setup
 
 ```bash
@@ -50,6 +118,7 @@ Untuk mengisi data seed, jalankan database dengan `docker compose up -d db targe
 
 ```bash
 go test ./...                                   # unit (integration auto-skip)
+cd web && npm test                              # Vitest (status + hide_rollback)
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/leafygo_test?sslmode=disable' \
   go test -p 1 ./...                            # unit + integration
 ```
