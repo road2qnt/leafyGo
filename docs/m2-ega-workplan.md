@@ -57,7 +57,8 @@ mobile dashboard/proposal/job pages.
   `overview.level`; the mock deliberately omits those decorations from the
   nested database object so the walkthrough catches regressions.
 - `partially_reverted` jobs only offer reverse resume; forward retry is hidden.
-  A successful normal rollback exposes a **Propose forward** action.
+  A successful normal rollback exposes **Propose forward** on the job monitor and
+  in history.
 - Dry-run rendering has four states (passed / inconclusive / failed / not
   validated) and blocks approval on failed.
 - Group deactivate is `type="button"`, console exporter defaults to stdout,

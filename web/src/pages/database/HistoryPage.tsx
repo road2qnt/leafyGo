@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Eye, Filter, History, RefreshCcw } from "lucide-react";
+import { Eye, Filter, History, RefreshCcw, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 
-import { jobApi } from "../../api/endpoints";
+import { migrationApi, jobApi } from "../../api/endpoints";
 import type { Execution } from "../../api/types";
 import {
   ActionBadge,
@@ -11,6 +11,7 @@ import {
   Callout,
   CheckboxRow,
   CodeBlock,
+  ConfirmDialog,
   ErrorBanner,
   KeyValue,
   Modal,
@@ -21,23 +22,55 @@ import {
   TableEmpty,
   TableWrap,
 } from "../../components/ui";
+import { useToast } from "../../hooks/useToast";
 import {
   formatDateTime,
   formatDuration,
   formatNumber,
   truncateMiddle,
 } from "../../lib/format";
+import { useDatabaseContext } from "./context";
 
 export default function HistoryPage() {
   const { dbId = "" } = useParams();
+  const { overview } = useDatabaseContext();
+  const navigate = useNavigate();
+  const toast = useToast();
   const [hideRollback, setHideRollback] = useState(false);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Execution | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<Execution | null>(null);
+  const [forwardError, setForwardError] = useState<unknown>(null);
+  const [forwarding, setForwarding] = useState(false);
 
   useEffect(() => {
     setSelected(null);
     setFilter("");
+    setForwardTarget(null);
   }, [dbId]);
+
+  const canEdit = overview.level === "edit";
+
+  const proposeForward = async () => {
+    if (!forwardTarget) return;
+    setForwarding(true);
+    setForwardError(null);
+    try {
+      const proposal = await migrationApi.createProposal(dbId, {
+        migration_id: forwardTarget.migration_id,
+        action_type: "forward",
+        target_execution_id: forwardTarget.execution_id,
+        reason: "Forward after successful rollback from history.",
+      });
+      toast.success("Forward proposal submitted", "Leaders must approve before re-applying.");
+      setForwardTarget(null);
+      navigate(`/databases/${dbId}/proposals/${proposal.id}`);
+    } catch (error) {
+      setForwardError(error);
+    } finally {
+      setForwarding(false);
+    }
+  };
 
   const historyQuery = useQuery({
     queryKey: ["database", dbId, "history", hideRollback],
@@ -149,9 +182,20 @@ export default function HistoryPage() {
                   </span>
                 </td>
                 <td className="td text-right">
-                  <Button variant="ghost" size="sm" onClick={() => setSelected(execution)}>
-                    <Eye className="h-3.5 w-3.5" /> View
-                  </Button>
+                  <div className="flex justify-end gap-1">
+                    {canEdit && execution.action_type === "rollback" && execution.status === "success" ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => { setForwardTarget(execution); setForwardError(null); }}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" /> Forward
+                      </Button>
+                    ) : null}
+                    <Button variant="ghost" size="sm" onClick={() => setSelected(execution)}>
+                      <Eye className="h-3.5 w-3.5" /> View
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -226,6 +270,26 @@ export default function HistoryPage() {
           </div>
         ) : null}
       </Modal>
+
+      <ConfirmDialog
+        open={forwardTarget !== null}
+        onClose={() => { setForwardTarget(null); setForwardError(null); }}
+        onConfirm={() => void proposeForward()}
+        title="Propose forward after rollback?"
+        description={
+          <div className="space-y-3">
+            <p>
+              Forward re-applies <strong>{forwardTarget?.migration_title_snapshot}</strong> after its
+              successful rollback. It still needs every required group leader to approve, and the
+              backend must confirm linear effective_seq order.
+            </p>
+            {forwardError ? <ErrorBanner error={forwardError} /> : null}
+          </div>
+        }
+        confirmLabel="Submit forward proposal"
+        tone="primary"
+        loading={forwarding}
+      />
     </div>
   );
 }
