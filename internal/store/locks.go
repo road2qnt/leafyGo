@@ -118,8 +118,21 @@ func (s *Store) RestoreLock(ctx context.Context, lease Lease) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := restoreLockTx(ctx, tx, lease); err != nil {
+		return err
+	}
+	if err := notifyJobs(ctx, tx, lease.DBID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("restore lock commit: %w", err)
+	}
+	return nil
+}
+
+func restoreLockTx(ctx context.Context, tx pgx.Tx, lease Lease) error {
 	var previous *string
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		select previous_lock_state from database_migration_locks
 		where db_id = $1 and job_id = $2 and worker_id = $3 and lock_epoch = $4
 		for update`, lease.DBID, lease.JobID, lease.WorkerID, lease.Epoch).Scan(&previous)
@@ -134,30 +147,24 @@ func (s *Store) RestoreLock(ctx context.Context, lease Lease) error {
 		if _, err := tx.Exec(ctx, `delete from database_migration_locks where db_id = $1`, lease.DBID); err != nil {
 			return fmt.Errorf("restore lock delete: %w", err)
 		}
-	} else {
-		var targetExecution, targetJob, targetMigration uuid.UUID
-		err := tx.QueryRow(ctx, `
-			select t.execution_id, t.job_id, t.migration_id
-			from migration_jobs j
-			join migration_proposals p on p.id = j.proposal_id
-			join migration_jobs t on t.execution_id = p.target_execution_id
-			where j.job_id = $1`, lease.JobID).Scan(&targetExecution, &targetJob, &targetMigration)
-		if err != nil {
-			return fmt.Errorf("restore lock load target job: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `
-			update database_migration_locks
-			set lock_state = previous_lock_state, previous_lock_state = null,
-			    job_id = $2, execution_id = $3, migration_id = $4, updated_at = now()
-			where db_id = $1`, lease.DBID, targetJob, targetExecution, targetMigration); err != nil {
-			return fmt.Errorf("restore lock update: %w", err)
-		}
+		return nil
 	}
-	if err := notifyJobs(ctx, tx, lease.DBID); err != nil {
-		return err
+	var targetExecution, targetJob, targetMigration uuid.UUID
+	err = tx.QueryRow(ctx, `
+		select t.execution_id, t.job_id, t.migration_id
+		from migration_jobs j
+		join migration_proposals p on p.id = j.proposal_id
+		join migration_jobs t on t.execution_id = p.target_execution_id
+		where j.job_id = $1`, lease.JobID).Scan(&targetExecution, &targetJob, &targetMigration)
+	if err != nil {
+		return fmt.Errorf("restore lock load target job: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("restore lock commit: %w", err)
+	if _, err := tx.Exec(ctx, `
+		update database_migration_locks
+		set lock_state = previous_lock_state, previous_lock_state = null,
+		    job_id = $2, execution_id = $3, migration_id = $4, updated_at = now()
+		where db_id = $1`, lease.DBID, targetJob, targetExecution, targetMigration); err != nil {
+		return fmt.Errorf("restore lock update: %w", err)
 	}
 	return nil
 }
