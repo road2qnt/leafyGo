@@ -1463,3 +1463,186 @@ func TestMigrationDefinitionsEffectiveSeqAndRelaxedSupersede(t *testing.T) {
 		t.Fatalf("migB3 seq=%d eff=%d; want seq=6 eff=2", migB3.SeqVersion, migB3.EffectiveSeq)
 	}
 }
+
+func TestMultiGroupApprovalQuorumIntersectionPredecessorGateAndAutoEnqueue(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+
+	leaderEdit := createUser(t, st, "leader_edit", false)
+	leaderView := createUser(t, st, "leader_view", false)
+	leaderRevoked := createUser(t, st, "leader_revoked", false)
+	outsider := createUser(t, st, "outsider", false)
+
+	conn := createDB(t, st, "core-db")
+
+	def1, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "m1", SQLUp: "CREATE TABLE m1(id int);", SQLDown: "DROP TABLE m1;", CreatedBy: &leaderEdit.ID,
+	})
+	if err != nil {
+		t.Fatalf("create def1: %v", err)
+	}
+	def2, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "m2", SQLUp: "CREATE TABLE m2(id int);", SQLDown: "DROP TABLE m2;", CreatedBy: &leaderEdit.ID,
+	})
+	if err != nil {
+		t.Fatalf("create def2: %v", err)
+	}
+
+	// 1. Submitting proposal when DB has 0 access groups -> ErrNoAccessGroups (422 NO_ACCESS_GROUPS)
+	if _, err := st.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		DBID: conn.ID, MigrationID: def1.ID, ActionType: domain.ActionApply, ProposedBy: leaderEdit.ID,
+	}); !errors.Is(err, store.ErrNoAccessGroups) {
+		t.Fatalf("submit with no access groups = %v; want ErrNoAccessGroups", err)
+	}
+
+	// 2. Group without active leader -> ErrMissingGroupLeader (422)
+	gEdit, _ := st.CreateGroup(ctx, "g-edit", "")
+	_ = st.AddGroupMember(ctx, gEdit.ID, leaderEdit.ID)
+	_ = st.SetGroupAccess(ctx, gEdit.ID, conn.ID, domain.LevelEdit)
+
+	if _, err := st.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		DBID: conn.ID, MigrationID: def1.ID, ActionType: domain.ActionApply, ProposedBy: leaderEdit.ID,
+	}); !errors.Is(err, store.ErrMissingGroupLeader) {
+		t.Fatalf("submit without group leader = %v; want ErrMissingGroupLeader", err)
+	}
+
+	_, _ = st.SetGroupLeader(ctx, gEdit.ID, &leaderEdit.ID)
+
+	gView, _ := st.CreateGroup(ctx, "g-view", "")
+	_ = st.AddGroupMember(ctx, gView.ID, leaderView.ID)
+	_, _ = st.SetGroupLeader(ctx, gView.ID, &leaderView.ID)
+	_ = st.SetGroupAccess(ctx, gView.ID, conn.ID, domain.LevelView)
+
+	gRevoked, _ := st.CreateGroup(ctx, "g-revoked", "")
+	_ = st.AddGroupMember(ctx, gRevoked.ID, leaderRevoked.ID)
+	_, _ = st.SetGroupLeader(ctx, gRevoked.ID, &leaderRevoked.ID)
+	_ = st.SetGroupAccess(ctx, gRevoked.ID, conn.ID, domain.LevelView)
+
+	// 3. Submit proposal for def1 and def2
+	prop1, err := st.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		DBID: conn.ID, MigrationID: def1.ID, ActionType: domain.ActionApply, ProposedBy: leaderEdit.ID,
+	})
+	if err != nil {
+		t.Fatalf("submit prop1: %v", err)
+	}
+	if prop1.Status != domain.ProposalPendingReview || len(prop1.Approvers) != 3 {
+		t.Fatalf("prop1 = %+v", prop1)
+	}
+
+	// Duplicate active proposal on def1 -> ErrDuplicateActiveProposal
+	if _, err := st.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		DBID: conn.ID, MigrationID: def1.ID, ActionType: domain.ActionApply, ProposedBy: leaderEdit.ID,
+	}); !errors.Is(err, store.ErrDuplicateActiveProposal) {
+		t.Fatalf("duplicate active proposal = %v; want ErrDuplicateActiveProposal", err)
+	}
+
+	// Withdraw prop1 -> status='withdrawn', increments def1.revision to 2, allows re-submitting
+	withdrawn, err := st.WithdrawProposal(ctx, conn.ID, prop1.ID)
+	if err != nil || withdrawn.Status != domain.ProposalWithdrawn {
+		t.Fatalf("withdraw prop1 = %+v, %v", withdrawn, err)
+	}
+	def1AfterWithdraw, _ := st.GetMigrationDefinition(ctx, conn.ID, def1.ID)
+	if def1AfterWithdraw.Revision != 2 {
+		t.Fatalf("def1 revision after withdraw = %d; want 2", def1AfterWithdraw.Revision)
+	}
+
+	// Re-submit prop1 and also submit prop2
+	prop1, err = st.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		DBID: conn.ID, MigrationID: def1.ID, ActionType: domain.ActionApply, ProposedBy: leaderEdit.ID,
+	})
+	if err != nil {
+		t.Fatalf("resubmit prop1: %v", err)
+	}
+	prop2, err := st.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		DBID: conn.ID, MigrationID: def2.ID, ActionType: domain.ActionApply, ProposedBy: leaderEdit.ID,
+	})
+	if err != nil {
+		t.Fatalf("submit prop2: %v", err)
+	}
+
+	// 4. Revoke access of gRevoked after submission -> quorum intersection becomes {gEdit, gView} (2 groups)
+	if err := st.RemoveGroupAccess(ctx, gRevoked.ID, conn.ID); err != nil {
+		t.Fatalf("remove gRevoked access: %v", err)
+	}
+
+	// Outsider is rejected with ErrNotGroupLeader
+	if _, err := st.ApproveProposal(ctx, store.ApproveProposalInput{
+		DBID: conn.ID, ProposalID: prop2.ID, Actor: outsider,
+	}); !errors.Is(err, store.ErrNotGroupLeader) {
+		t.Fatalf("outsider approve = %v; want ErrNotGroupLeader", err)
+	}
+
+	// 5. Out-of-order approval on prop2 (slot 2) while prop1 (slot 1) is still pending_review:
+	// First leader (leaderEdit - self-approval as proposer-leader) approves prop2 -> pending_review (1/2)
+	res2First, err := st.ApproveProposal(ctx, store.ApproveProposalInput{
+		DBID: conn.ID, ProposalID: prop2.ID, Actor: leaderEdit, Comment: "lgtm 1",
+	})
+	if err != nil {
+		t.Fatalf("prop2 first leader approve: %v", err)
+	}
+	if res2First.Enqueued || res2First.ApprovedCount != 1 || res2First.RequiredCount != 2 {
+		t.Fatalf("res2First = %+v", res2First)
+	}
+
+	// Final leader (leaderView) approves prop2 while slot 1 is still pending_review -> 409 PREDECESSOR_NOT_READY,
+	// transaction rolls back and prop2 remains in pending_review!
+	if _, err := st.ApproveProposal(ctx, store.ApproveProposalInput{
+		DBID: conn.ID, ProposalID: prop2.ID, Actor: leaderView, Comment: "lgtm 2",
+	}); !errors.Is(err, store.ErrPredecessorNotReady) {
+		t.Fatalf("out-of-order final approve on prop2 = %v; want ErrPredecessorNotReady", err)
+	}
+	prop2Check, _ := st.GetMigrationProposal(ctx, conn.ID, prop2.ID)
+	if prop2Check.Status != domain.ProposalPendingReview {
+		t.Fatalf("prop2 status after predecessor gate rejection = %q; want pending_review", prop2Check.Status)
+	}
+
+	// 6. Approve prop1 (slot 1): leaderEdit approves, then two concurrent requests from leaderView race -> exactly 1 job created
+	if _, err := st.ApproveProposal(ctx, store.ApproveProposalInput{
+		DBID: conn.ID, ProposalID: prop1.ID, Actor: leaderEdit,
+	}); err != nil {
+		t.Fatalf("prop1 first approve: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	results := make(chan store.ApproveProposalResult, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, e := st.ApproveProposal(ctx, store.ApproveProposalInput{
+				DBID: conn.ID, ProposalID: prop1.ID, Actor: leaderView,
+			})
+			if e != nil {
+				errs <- e
+			} else {
+				results <- r
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(results)
+
+	if len(results) != 1 {
+		t.Fatalf("concurrent final approve successes = %d; want 1", len(results))
+	}
+	res1Final := <-results
+	if !res1Final.Enqueued || res1Final.Proposal.Status != domain.ProposalQueued || res1Final.Job == nil || res1Final.Execution == nil {
+		t.Fatalf("res1Final = %+v", res1Final)
+	}
+	if res1Final.Execution.RootExecutionID != res1Final.Execution.ExecutionID || res1Final.Execution.RollbackOfExecutionID != nil {
+		t.Fatalf("apply execution lineage = %+v", res1Final.Execution)
+	}
+
+	// 7. Now that slot 1 has a 'queued' job, final leader approval on prop2 (slot 2) passes the Predecessor Gate!
+	res2Final, err := st.ApproveProposal(ctx, store.ApproveProposalInput{
+		DBID: conn.ID, ProposalID: prop2.ID, Actor: leaderView,
+	})
+	if err != nil {
+		t.Fatalf("prop2 final approve after slot 1 queued: %v", err)
+	}
+	if !res2Final.Enqueued || res2Final.Job.QueueSeq <= res1Final.Job.QueueSeq {
+		t.Fatalf("expected prop2 job queue_seq (%d) > prop1 job queue_seq (%d)", res2Final.Job.QueueSeq, res1Final.Job.QueueSeq)
+	}
+}

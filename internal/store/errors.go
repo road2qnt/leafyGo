@@ -24,6 +24,12 @@ var (
 	ErrDuplicateActiveProposal  = errors.New("duplicate active proposal")
 	ErrMigrationNotSupersedable = errors.New("migration is not supersedable")
 	ErrInvalidMigrationDef      = errors.New("invalid migration definition")
+	ErrNoAccessGroups           = errors.New("no active access groups for database")
+	ErrMissingGroupLeader       = errors.New("one or more access groups do not have an active leader")
+	ErrNotGroupLeader           = errors.New("user is not a required group leader for this proposal")
+	ErrPredecessorNotReady      = errors.New("predecessor migration is not ready")
+	ErrProposalNotPendingReview = errors.New("proposal is not in pending_review status")
+	ErrInvalidProposalAction    = errors.New("invalid proposal action or target execution")
 )
 
 func mapWriteError(err error) error {

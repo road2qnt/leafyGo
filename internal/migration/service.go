@@ -36,16 +36,34 @@ type Options struct {
 	AdvisoryLockTimeout time.Duration
 	MigrationTimeout    time.Duration
 	MaxMigrationBytes   int
+	DryRunUserCooldown  time.Duration
+}
+
+// WorkflowStore defines the Milestone 2 store operations used by Service for definitions, proposals, and approvals.
+type WorkflowStore interface {
+	CreateMigrationDefinition(ctx context.Context, def domain.MigrationDefinition) (domain.MigrationDefinition, error)
+	UpdateMigrationDefinition(ctx context.Context, def domain.MigrationDefinition) (domain.MigrationDefinition, error)
+	GetMigrationDefinition(ctx context.Context, dbID, migrationID uuid.UUID) (domain.MigrationDefinition, error)
+	ListMigrationDefinitions(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationDefinition, error)
+	SubmitProposalToReview(ctx context.Context, in store.SubmitProposalInput) (domain.MigrationProposal, error)
+	GetMigrationProposal(ctx context.Context, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error)
+	ListMigrationProposals(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationProposal, error)
+	WithdrawProposal(ctx context.Context, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error)
+	ApproveProposal(ctx context.Context, in store.ApproveProposalInput) (store.ApproveProposalResult, error)
+	RejectProposal(ctx context.Context, in store.ApproveProposalInput) (domain.MigrationProposal, error)
 }
 
 type Service struct {
-	store  HistoryStore
-	runner Runner
-	sem    chan struct{}
-	opts   Options
+	store        HistoryStore
+	workflow     WorkflowStore
+	runner       Runner
+	connOpener   DedicatedConnOpener
+	dryRunGuard  *DryRunGuard
+	sem          chan struct{}
+	opts         Options
 }
 
-func NewService(store HistoryStore, runner Runner, opts Options) *Service {
+func NewService(st HistoryStore, runner Runner, opts Options) *Service {
 	if opts.AdvisoryLockTimeout <= 0 {
 		opts.AdvisoryLockTimeout = 10 * time.Second
 	}
@@ -55,12 +73,270 @@ func NewService(store HistoryStore, runner Runner, opts Options) *Service {
 	if opts.MaxMigrationBytes <= 0 {
 		opts.MaxMigrationBytes = 1048576 // 1 MiB default
 	}
-	return &Service{
-		store:  store,
-		runner: runner,
-		sem:    make(chan struct{}, maxConcurrentMigrations),
-		opts:   opts,
+	var wf WorkflowStore
+	if w, ok := st.(WorkflowStore); ok {
+		wf = w
 	}
+	var opener DedicatedConnOpener
+	if op, ok := runner.(DedicatedConnOpener); ok {
+		opener = op
+	}
+	return &Service{
+		store:       st,
+		workflow:    wf,
+		runner:      runner,
+		connOpener:  opener,
+		dryRunGuard: NewDryRunGuard(opts.DryRunUserCooldown),
+		sem:         make(chan struct{}, maxConcurrentMigrations),
+		opts:        opts,
+	}
+}
+
+func (s *Service) DryRunGuard() *DryRunGuard {
+	return s.dryRunGuard
+}
+
+func mapStoreWorkflowError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return ErrNotFound
+	case errors.Is(err, store.ErrMigrationImmutable):
+		return fmt.Errorf("%w: %v", ErrMigrationImmutable, err)
+	case errors.Is(err, store.ErrActiveProposalExists), errors.Is(err, store.ErrDuplicateActiveProposal):
+		return fmt.Errorf("%w: %v", ErrDuplicateActiveProposal, err)
+	case errors.Is(err, store.ErrMigrationNotSupersedable):
+		return fmt.Errorf("%w: %v", ErrMigrationNotSupersedable, err)
+	case errors.Is(err, store.ErrNoAccessGroups):
+		return fmt.Errorf("%w: %v", ErrNoAccessGroups, err)
+	case errors.Is(err, store.ErrMissingGroupLeader):
+		return fmt.Errorf("%w: %v", ErrMissingGroupLeader, err)
+	case errors.Is(err, store.ErrNotGroupLeader):
+		return fmt.Errorf("%w: %v", ErrNotGroupLeader, err)
+	case errors.Is(err, store.ErrPredecessorNotReady):
+		return fmt.Errorf("%w: %v", ErrPredecessorNotReady, err)
+	case errors.Is(err, store.ErrProposalNotPendingReview), errors.Is(err, store.ErrConflict):
+		return fmt.Errorf("%w: %v", ErrConflict, err)
+	case errors.Is(err, store.ErrInvalidMigrationDef), errors.Is(err, store.ErrInvalidProposalAction):
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	default:
+		return err
+	}
+}
+
+// QuorumGroupState represents a group in the snapshot or active db_access for quorum intersection evaluation.
+type QuorumGroupState struct {
+	GroupID          uuid.UUID
+	GroupName        string
+	SnapshotLeaderID uuid.UUID
+	CurrentLeaderID  *uuid.UUID
+	HasCurrentAccess bool
+	IsGroupDeleted   bool
+}
+
+// EvaluateQuorumIntersection computes the intersection (Snapshot ∩ CurrentActiveDBGroups)
+// and counts how many groups in the intersection have an 'approved' decision.
+// Returns ErrNoAccessGroups if the intersection is empty.
+func EvaluateQuorumIntersection(snapshot []QuorumGroupState, decisions map[uuid.UUID]string) (requiredGroups []QuorumGroupState, requiredCount, approvedCount int, err error) {
+	for _, g := range snapshot {
+		if !g.HasCurrentAccess || g.IsGroupDeleted {
+			continue
+		}
+		requiredGroups = append(requiredGroups, g)
+		requiredCount++
+		if decisions[g.GroupID] == domain.DecisionApproved {
+			approvedCount++
+		}
+	}
+	if requiredCount == 0 {
+		return nil, 0, 0, ErrNoAccessGroups
+	}
+	return requiredGroups, requiredCount, approvedCount, nil
+}
+
+// MatchActorLeaderGroups returns all group_ids in requiredGroups for which actor is the leader.
+// Self-approval by a proposer who is also an active Group Leader is allowed.
+// Platform Admins or users who do not lead any group in requiredGroups are rejected with ErrNotGroupLeader.
+func MatchActorLeaderGroups(actor domain.User, requiredGroups []QuorumGroupState) ([]uuid.UUID, error) {
+	if len(requiredGroups) == 0 {
+		return nil, ErrNoAccessGroups
+	}
+	if actor.IsPlatformAdmin || !actor.IsActive {
+		return nil, ErrNotGroupLeader
+	}
+	var matched []uuid.UUID
+	for _, g := range requiredGroups {
+		effectiveLeader := g.SnapshotLeaderID
+		if g.CurrentLeaderID != nil && *g.CurrentLeaderID != uuid.Nil {
+			effectiveLeader = *g.CurrentLeaderID
+		}
+		if effectiveLeader == actor.ID || g.SnapshotLeaderID == actor.ID {
+			matched = append(matched, g.GroupID)
+		}
+	}
+	if len(matched) == 0 {
+		return nil, ErrNotGroupLeader
+	}
+	return matched, nil
+}
+
+// SlotReadinessState describes the state of an effective_seq slot on a database for Predecessor Gate evaluation.
+type SlotReadinessState struct {
+	EffectiveSeq             int64
+	IsActive                 bool
+	HasQueuedOrRunningApply  bool
+	HasQueuedOrRunningRevert bool
+}
+
+// CheckPredecessorGate evaluates the Task 4 Predecessor Approval Gate (409 PREDECESSOR_NOT_READY).
+func CheckPredecessorGate(actionType string, targetEffectiveSeq int64, slots []SlotReadinessState) error {
+	slotMap := make(map[int64]SlotReadinessState, len(slots))
+	for _, s := range slots {
+		slotMap[s.EffectiveSeq] = s
+	}
+
+	switch actionType {
+	case domain.ActionApply, domain.ActionForward:
+		if cur, ok := slotMap[targetEffectiveSeq]; ok {
+			if cur.IsActive || cur.HasQueuedOrRunningApply {
+				return ErrPredecessorNotReady
+			}
+		}
+		for _, s := range slots {
+			if s.EffectiveSeq < targetEffectiveSeq {
+				if !s.IsActive && !s.HasQueuedOrRunningApply {
+					return ErrPredecessorNotReady
+				}
+			}
+		}
+		return nil
+
+	case domain.ActionRollback:
+		cur, ok := slotMap[targetEffectiveSeq]
+		if !ok || !cur.IsActive {
+			return ErrPredecessorNotReady
+		}
+		for _, s := range slots {
+			if s.EffectiveSeq > targetEffectiveSeq && s.IsActive && !s.HasQueuedOrRunningRevert {
+				return ErrPredecessorNotReady
+			}
+		}
+		return nil
+
+	default:
+		return nil
+	}
+}
+
+type SubmitProposalRequest struct {
+	Actor             domain.User
+	DB                domain.DBConnection
+	Level             domain.AccessLevel
+	MigrationID       uuid.UUID
+	ActionType        string
+	TargetExecutionID *uuid.UUID
+	Resolution        *string
+	Reason            string
+}
+
+type SubmitProposalResponse struct {
+	Proposal domain.MigrationProposal `json:"proposal"`
+	DryRun   DryRunResult             `json:"dry_run"`
+}
+
+// SubmitProposal validates RBAC (LevelEdit required), runs the Task 3 lexical guard and pre-review dry-run
+// (BEGIN ... ROLLBACK) on Target DB, and snapshots migration_proposal_approvers in pending_review.
+func (s *Service) SubmitProposal(ctx context.Context, req SubmitProposalRequest) (SubmitProposalResponse, error) {
+	if req.Actor.IsPlatformAdmin || req.Level < domain.LevelEdit {
+		return SubmitProposalResponse{}, ErrForbidden
+	}
+	if s.workflow == nil {
+		return SubmitProposalResponse{}, errors.New("workflow store not configured")
+	}
+
+	def, err := s.workflow.GetMigrationDefinition(ctx, req.DB.ID, req.MigrationID)
+	if err != nil {
+		return SubmitProposalResponse{}, mapStoreWorkflowError(err)
+	}
+
+	proposalID := uuid.New()
+	var dryRes DryRunResult
+	if req.ActionType == domain.ActionResolveUncertain {
+		dryRes = DryRunResult{Status: DryRunStatusSkipped}
+	} else if s.connOpener != nil {
+		dryRes, err = RunPreReviewDryRun(ctx, s.connOpener, s.dryRunGuard, req.DB, req.Actor.ID, proposalID, def, req.ActionType)
+		if err != nil {
+			return SubmitProposalResponse{}, err
+		}
+	} else {
+		if err := ValidateDefinitionLexical(def, req.ActionType); err != nil {
+			return SubmitProposalResponse{}, err
+		}
+		dryRes = DryRunResult{Status: DryRunStatusPassed}
+	}
+
+	prop, err := s.workflow.SubmitProposalToReview(ctx, store.SubmitProposalInput{
+		ID:                proposalID,
+		DBID:              req.DB.ID,
+		MigrationID:       req.MigrationID,
+		ActionType:        req.ActionType,
+		TargetExecutionID: req.TargetExecutionID,
+		Resolution:        req.Resolution,
+		Reason:            req.Reason,
+		ProposedBy:        req.Actor.ID,
+	})
+	if err != nil {
+		return SubmitProposalResponse{}, mapStoreWorkflowError(err)
+	}
+
+	return SubmitProposalResponse{
+		Proposal: prop,
+		DryRun:   dryRes,
+	}, nil
+}
+
+func (s *Service) WithdrawProposal(ctx context.Context, actor domain.User, level domain.AccessLevel, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error) {
+	if actor.IsPlatformAdmin || level < domain.LevelEdit {
+		return domain.MigrationProposal{}, ErrForbidden
+	}
+	if s.workflow == nil {
+		return domain.MigrationProposal{}, errors.New("workflow store not configured")
+	}
+	prop, err := s.workflow.WithdrawProposal(ctx, dbID, proposalID)
+	if err != nil {
+		return domain.MigrationProposal{}, mapStoreWorkflowError(err)
+	}
+	return prop, nil
+}
+
+func (s *Service) ApproveProposal(ctx context.Context, in store.ApproveProposalInput) (store.ApproveProposalResult, error) {
+	if in.Actor.IsPlatformAdmin {
+		return store.ApproveProposalResult{}, ErrNotGroupLeader
+	}
+	if s.workflow == nil {
+		return store.ApproveProposalResult{}, errors.New("workflow store not configured")
+	}
+	res, err := s.workflow.ApproveProposal(ctx, in)
+	if err != nil {
+		return store.ApproveProposalResult{}, mapStoreWorkflowError(err)
+	}
+	return res, nil
+}
+
+func (s *Service) RejectProposal(ctx context.Context, in store.ApproveProposalInput) (domain.MigrationProposal, error) {
+	if in.Actor.IsPlatformAdmin {
+		return domain.MigrationProposal{}, ErrNotGroupLeader
+	}
+	if s.workflow == nil {
+		return domain.MigrationProposal{}, errors.New("workflow store not configured")
+	}
+	prop, err := s.workflow.RejectProposal(ctx, in)
+	if err != nil {
+		return domain.MigrationProposal{}, mapStoreWorkflowError(err)
+	}
+	return prop, nil
 }
 
 type ExecuteInput struct {
