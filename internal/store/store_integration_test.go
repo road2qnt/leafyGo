@@ -1282,3 +1282,184 @@ func TestM2DeletionPolicyAndImmutabilityTriggers(t *testing.T) {
 		t.Fatal("expected new UUID for reused DB name")
 	}
 }
+
+func TestMigrationDefinitionsEffectiveSeqAndRelaxedSupersede(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+
+	user := createUser(t, st, "dev", false)
+	conn := createDB(t, st, "app-db")
+
+	insertExec := func(migID uuid.UUID, actionType, status string, rollbackOf *uuid.UUID) uuid.UUID {
+		t.Helper()
+		execID := uuid.New()
+		_, err := st.Pool().Exec(ctx, `
+			insert into migration_executions (
+				execution_id, root_execution_id, db_id, migration_id,
+				migration_revision, action_type, executed_sql, executed_by,
+				executed_by_username, db_name_snapshot, migration_title_snapshot,
+				status, rollback_of_execution_id
+			) values ($1, $1, $2, $3, 1, $4, 'SELECT 1;', $5, 'dev', 'app-db', 'm', $6, $7)`,
+			execID, conn.ID, migID, actionType, user.ID, status, rollbackOf)
+		if err != nil {
+			t.Fatalf("insert execution (%s, %s): %v", actionType, status, err)
+		}
+		return execID
+	}
+
+	// 1. Create A(seq=1, eff=1), B(seq=2, eff=2), C(seq=3, eff=3)
+	migA, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "A", SQLUp: "CREATE TABLE a(id int);", SQLDown: "DROP TABLE a;", CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	if migA.SeqVersion != 1 || migA.EffectiveSeq != 1 || migA.Revision != 1 {
+		t.Fatalf("migA = %+v", migA)
+	}
+
+	migB, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B", SQLUp: "CREATE TABLE b(id int);", SQLDown: "DROP TABLE b;", CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	if migB.SeqVersion != 2 || migB.EffectiveSeq != 2 {
+		t.Fatalf("migB = %+v", migB)
+	}
+
+	migC, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "C", SQLUp: "CREATE TABLE c(id int);", SQLDown: "DROP TABLE c;", CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create C: %v", err)
+	}
+	if migC.SeqVersion != 3 || migC.EffectiveSeq != 3 {
+		t.Fatalf("migC = %+v", migC)
+	}
+
+	// 2. Edit definition while draft increments revision
+	migCUpdated, err := st.UpdateMigrationDefinition(ctx, domain.MigrationDefinition{
+		ID: migC.ID, DBID: conn.ID, Revision: 1,
+		Title: "C-v2", SQLUp: "CREATE TABLE c(id bigint);", SQLDown: "DROP TABLE c;", UpdatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("update C: %v", err)
+	}
+	if migCUpdated.Revision != 2 || migCUpdated.Title != "C-v2" {
+		t.Fatalf("migCUpdated = %+v", migCUpdated)
+	}
+
+	// Active proposal blocks UpdateMigrationDefinition with ErrActiveProposalExists
+	propID := uuid.New()
+	if _, err := st.Pool().Exec(ctx, `
+		insert into migration_proposals (id, db_id, migration_id, migration_revision, action_type, status, proposed_by)
+		values ($1, $2, $3, 2, 'apply', 'pending_review', $4)`,
+		propID, conn.ID, migC.ID, user.ID); err != nil {
+		t.Fatalf("insert active proposal on C: %v", err)
+	}
+	if _, err := st.UpdateMigrationDefinition(ctx, domain.MigrationDefinition{
+		ID: migC.ID, DBID: conn.ID, Title: "C-v3", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;",
+	}); !errors.Is(err, store.ErrActiveProposalExists) {
+		t.Fatalf("edit with active proposal = %v; want ErrActiveProposalExists", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `update migration_proposals set status = 'withdrawn' where id = $1`, propID); err != nil {
+		t.Fatalf("withdraw proposal: %v", err)
+	}
+
+	// 3. A succeeds (Active), B fails (immutable)
+	insertExec(migA.ID, domain.ActionApply, domain.StatusSuccess, nil)
+	if _, err := st.Pool().Exec(ctx, `update migration_definitions set is_immutable = true where id in ($1, $2)`, migA.ID, migB.ID); err != nil {
+		t.Fatalf("mark A and B immutable: %v", err)
+	}
+	insertExec(migB.ID, domain.ActionApply, domain.StatusFailed, nil)
+
+	// Immutable definition cannot be edited
+	if _, err := st.UpdateMigrationDefinition(ctx, domain.MigrationDefinition{
+		ID: migB.ID, DBID: conn.ID, Title: "B-edit", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;",
+	}); !errors.Is(err, store.ErrMigrationImmutable) {
+		t.Fatalf("edit immutable B = %v; want ErrMigrationImmutable", err)
+	}
+
+	// Superseding A (which is currently Active) must fail with ErrMigrationNotSupersedable
+	if _, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "A-prime", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;", ReplacesMigrationID: &migA.ID,
+	}); !errors.Is(err, store.ErrMigrationNotSupersedable) {
+		t.Fatalf("supersede active A = %v; want ErrMigrationNotSupersedable", err)
+	}
+
+	// Superseding C (slot 3 while slot 2 is not yet Active) must fail with ErrMigrationNotSupersedable
+	if _, err := st.Pool().Exec(ctx, `update migration_definitions set is_immutable = true where id = $1`, migC.ID); err != nil {
+		t.Fatalf("mark C immutable: %v", err)
+	}
+	if _, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "C-prime", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;", ReplacesMigrationID: &migC.ID,
+	}); !errors.Is(err, store.ErrMigrationNotSupersedable) {
+		t.Fatalf("supersede slot 3 while slot 2 inactive = %v; want ErrMigrationNotSupersedable", err)
+	}
+
+	// 4. Create B' replacing B -> seq_version = 4, effective_seq = 2
+	migBPrime, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B-prime", SQLUp: "CREATE TABLE b1(id int);", SQLDown: "DROP TABLE b1;",
+		ReplacesMigrationID: &migB.ID, CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create B': %v", err)
+	}
+	if migBPrime.SeqVersion != 4 || migBPrime.EffectiveSeq != 2 {
+		t.Fatalf("migBPrime seq=%d eff=%d; want seq=4 eff=2", migBPrime.SeqVersion, migBPrime.EffectiveSeq)
+	}
+
+	// While B' has an in-flight/partial execution, superseding B' is blocked
+	bPrimeExec := insertExec(migBPrime.ID, domain.ActionApply, domain.StatusPartial, nil)
+	if _, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B-double-prime", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;",
+		ReplacesMigrationID: &migBPrime.ID,
+	}); !errors.Is(err, store.ErrMigrationNotSupersedable) {
+		t.Fatalf("supersede B' while partial = %v; want ErrMigrationNotSupersedable", err)
+	}
+
+	// Mark B' execution as failed -> Chained Supersede B'' replacing B' succeeds with effective_seq = 2
+	if _, err := st.Pool().Exec(ctx, `update migration_executions set status = 'failed' where execution_id = $1`, bPrimeExec); err != nil {
+		t.Fatalf("mark B' exec failed: %v", err)
+	}
+	migB2, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B-double-prime", SQLUp: "CREATE TABLE b2(id int);", SQLDown: "DROP TABLE b2;",
+		ReplacesMigrationID: &migBPrime.ID, CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create B'': %v", err)
+	}
+	if migB2.SeqVersion != 5 || migB2.EffectiveSeq != 2 {
+		t.Fatalf("migB2 seq=%d eff=%d; want seq=5 eff=2", migB2.SeqVersion, migB2.EffectiveSeq)
+	}
+
+	// 5. B'' succeeds -> MarkSupersededChain marks B and B' as is_superseded = true
+	b2ApplyExec := insertExec(migB2.ID, domain.ActionApply, domain.StatusSuccess, nil)
+	if err := st.MarkSupersededChain(ctx, conn.ID, migB2.EffectiveSeq, migB2.ID); err != nil {
+		t.Fatalf("MarkSupersededChain: %v", err)
+	}
+	gotB, _ := st.GetMigrationDefinition(ctx, conn.ID, migB.ID)
+	gotBPrime, _ := st.GetMigrationDefinition(ctx, conn.ID, migBPrime.ID)
+	gotB2, _ := st.GetMigrationDefinition(ctx, conn.ID, migB2.ID)
+	if !gotB.IsSuperseded || !gotBPrime.IsSuperseded || gotB2.IsSuperseded || !gotB2.IsActive {
+		t.Fatalf("superseded/active flags: B=%v B'=%v B''(sup=%v, active=%v)",
+			gotB.IsSuperseded, gotBPrime.IsSuperseded, gotB2.IsSuperseded, gotB2.IsActive)
+	}
+
+	// 6. Relaxed Supersede: B'' is rolled back (rollback -> success), then forward fails (forward -> failed).
+	// Historic apply->success on B'' was cancelled by rollback->success, so creating B''' replacing B'' MUST succeed!
+	insertExec(migB2.ID, domain.ActionRollback, domain.StatusSuccess, &b2ApplyExec)
+	insertExec(migB2.ID, domain.ActionForward, domain.StatusFailed, nil)
+
+	migB3, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B-triple-prime", SQLUp: "CREATE TABLE b3(id int);", SQLDown: "DROP TABLE b3;",
+		ReplacesMigrationID: &migB2.ID, CreatedBy: &user.ID,
+	})
+	if err != nil {
+		t.Fatalf("relaxed supersede B''' after rollback + failed forward: %v", err)
+	}
+	if migB3.SeqVersion != 6 || migB3.EffectiveSeq != 2 {
+		t.Fatalf("migB3 seq=%d eff=%d; want seq=6 eff=2", migB3.SeqVersion, migB3.EffectiveSeq)
+	}
+}
