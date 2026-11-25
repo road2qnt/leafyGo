@@ -138,6 +138,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/logout", s.handleLogout)
 		r.Get("/", s.handleDashboard)
 
+		r.Get("/api/v1/databases/{id}/jobs/{jobID}", s.handleAPIJobGet)
+
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.requirePlatformAdmin)
 			r.Get("/users", s.handleAdminUsers)

@@ -38,7 +38,7 @@ func testServer(t *testing.T, loggers ...*slog.Logger) (*Server, *store.Store) {
 	}
 	t.Cleanup(func() { pool.Close() })
 	st := store.New(pool)
-	if _, err := pool.Exec(ctx, `truncate users, groups, group_members, db_connections, db_access, sessions, migration_history, migration_drafts`); err != nil {
+	if _, err := pool.Exec(ctx, `truncate users, groups, group_members, db_connections, db_access, sessions, migration_history, migration_drafts cascade`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	key := make([]byte, 32)
