@@ -818,3 +818,129 @@ func TestServiceExplainMultiStatementRejected(t *testing.T) {
 		t.Errorf("expected ErrValidation, got %v", err)
 	}
 }
+
+func TestRunPreReviewDryRunIntegration(t *testing.T) {
+	_, mgr, dbConn, user, _ := setupIntegration(t)
+	schema := createTargetSchema(t, mgr, dbConn)
+	ctx := context.Background()
+	guard := migration.NewDryRunGuard(0)
+
+	// 1. Multi-statement DDL + DML passes dry-run BEGIN ... ROLLBACK and leaves nothing in Target DB
+	defDDL := domain.MigrationDefinition{
+		ID:            uuid.New(),
+		DBID:          dbConn.ID,
+		Title:         "create orders",
+		SQLUp:         fmt.Sprintf("CREATE TABLE %s.dry_orders (id bigint primary key, amount int); ALTER TABLE %s.dry_orders ADD COLUMN note text; INSERT INTO %s.dry_orders VALUES (1, 100, 'ok');", schema, schema, schema),
+		SQLDown:       fmt.Sprintf("DROP TABLE %s.dry_orders;", schema),
+		ExecutionMode: domain.ExecutionModeNormal,
+	}
+	res, err := migration.RunPreReviewDryRun(ctx, mgr, guard, dbConn, user.ID, uuid.New(), defDDL, domain.ActionApply)
+	if err != nil {
+		t.Fatalf("RunPreReviewDryRun valid DDL failed: %v", err)
+	}
+	if res.Status != migration.DryRunStatusPassed {
+		t.Fatalf("dry_run_status = %q; want %q", res.Status, migration.DryRunStatusPassed)
+	}
+
+	pool, err := mgr.Pool(ctx, dbConn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	var exists bool
+	if err := pool.QueryRow(ctx, `select exists(select 1 from information_schema.tables where table_schema=$1 and table_name='dry_orders')`, schema).Scan(&exists); err != nil {
+		t.Fatalf("check dry_orders existence: %v", err)
+	}
+	if exists {
+		t.Fatal("dry_orders table must not persist after dry-run ROLLBACK")
+	}
+
+	// 2. Slow DML (pg_sleep(3.5) -> SQLSTATE 57014) returns dry_run_status = "inconclusive" (no error!)
+	defSlow := domain.MigrationDefinition{
+		ID:             uuid.New(),
+		DBID:           dbConn.ID,
+		Title:          "slow dml",
+		SQLUp:          "SELECT pg_sleep(3.5);",
+		IsIrreversible: true,
+		ExecutionMode:  domain.ExecutionModeNormal,
+	}
+	resSlow, err := migration.RunPreReviewDryRun(ctx, mgr, guard, dbConn, user.ID, uuid.New(), defSlow, domain.ActionApply)
+	if err != nil {
+		t.Fatalf("RunPreReviewDryRun slow DML should be inconclusive, got error: %v", err)
+	}
+	if resSlow.Status != migration.DryRunStatusInconclusive || resSlow.SQLState != "57014" {
+		t.Fatalf("slow dry-run = %+v; want inconclusive 57014", resSlow)
+	}
+
+	// 3. Syntax / catalog error (42P01 undefined table) rejected with ErrInvalidMigrationSQL
+	defBadSQL := domain.MigrationDefinition{
+		ID:             uuid.New(),
+		DBID:           dbConn.ID,
+		Title:          "bad sql",
+		SQLUp:          fmt.Sprintf("SELECT * FROM %s.non_existent_table_xyz;", schema),
+		IsIrreversible: true,
+		ExecutionMode:  domain.ExecutionModeNormal,
+	}
+	if _, err := migration.RunPreReviewDryRun(ctx, mgr, guard, dbConn, user.ID, uuid.New(), defBadSQL, domain.ActionApply); !errors.Is(err, migration.ErrInvalidMigrationSQL) {
+		t.Fatalf("bad SQL dry-run = %v; want ErrInvalidMigrationSQL", err)
+	}
+
+	// 4. Batch mode catalog and cursor type validation
+	if _, err := mgr.Run(ctx, dbConn, fmt.Sprintf("CREATE TABLE %s.batch_items (id bigint primary key, code text not null, v int not null default 0);", schema), 5*time.Second); err != nil {
+		t.Fatalf("create batch_items: %v", err)
+	}
+
+	// Non-existent batch table -> ErrInvalidBatchIdentifier
+	defMissingTable := domain.MigrationDefinition{
+		ID:            uuid.New(),
+		DBID:          dbConn.ID,
+		Title:         "batch missing table",
+		SQLUp:         fmt.Sprintf("UPDATE %s.missing SET v = 1 WHERE id >= {{cursor_from}} AND id <= {{cursor_to}};", schema),
+		SQLDown:       fmt.Sprintf("UPDATE %s.missing SET v = 0 WHERE id >= {{cursor_from}} AND id <= {{cursor_to}};", schema),
+		ExecutionMode: domain.ExecutionModeBatch,
+		BatchConfig: &domain.BatchConfig{
+			TableName: schema + ".missing",
+			CursorCol: "id",
+			BatchSize: 100,
+		},
+	}
+	if _, err := migration.RunPreReviewDryRun(ctx, mgr, guard, dbConn, user.ID, uuid.New(), defMissingTable, domain.ActionApply); !errors.Is(err, migration.ErrInvalidBatchIdentifier) {
+		t.Fatalf("missing batch table = %v; want ErrInvalidBatchIdentifier", err)
+	}
+
+	// Non-integer cursor_col (text) -> ErrInvalidBatchCursorType
+	defTextCursor := domain.MigrationDefinition{
+		ID:            uuid.New(),
+		DBID:          dbConn.ID,
+		Title:         "batch text cursor",
+		SQLUp:         fmt.Sprintf("UPDATE %s.batch_items SET v = 1 WHERE id >= {{cursor_from}} AND id <= {{cursor_to}};", schema),
+		SQLDown:       fmt.Sprintf("UPDATE %s.batch_items SET v = 0 WHERE id >= {{cursor_from}} AND id <= {{cursor_to}};", schema),
+		ExecutionMode: domain.ExecutionModeBatch,
+		BatchConfig: &domain.BatchConfig{
+			TableName: schema + ".batch_items",
+			CursorCol: "code",
+			BatchSize: 100,
+		},
+	}
+	if _, err := migration.RunPreReviewDryRun(ctx, mgr, guard, dbConn, user.ID, uuid.New(), defTextCursor, domain.ActionApply); !errors.Is(err, migration.ErrInvalidBatchCursorType) {
+		t.Fatalf("text cursor_col = %v; want ErrInvalidBatchCursorType", err)
+	}
+
+	// Valid batch definition with bigint cursor_col -> passes bound-zero dry-run
+	defValidBatch := domain.MigrationDefinition{
+		ID:            uuid.New(),
+		DBID:          dbConn.ID,
+		Title:         "batch valid",
+		SQLUp:         fmt.Sprintf("UPDATE %s.batch_items SET v = 1 WHERE id >= {{cursor_from}} AND id <= {{cursor_to}};", schema),
+		SQLDown:       fmt.Sprintf("UPDATE %s.batch_items SET v = 0 WHERE id >= {{cursor_from}} AND id <= {{cursor_to}};", schema),
+		ExecutionMode: domain.ExecutionModeBatch,
+		BatchConfig: &domain.BatchConfig{
+			TableName: schema + ".batch_items",
+			CursorCol: "id",
+			BatchSize: 100,
+		},
+	}
+	resBatch, err := migration.RunPreReviewDryRun(ctx, mgr, guard, dbConn, user.ID, uuid.New(), defValidBatch, domain.ActionApply)
+	if err != nil || resBatch.Status != migration.DryRunStatusPassed {
+		t.Fatalf("valid batch dry-run = (%+v, %v); want passed", resBatch, err)
+	}
+}
