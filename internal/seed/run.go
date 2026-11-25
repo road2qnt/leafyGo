@@ -62,6 +62,16 @@ func Run(ctx context.Context, deps Deps, opts Options) error {
 		}
 		conns = append(conns, connSeed{Name: t.Conn, Host: t.Host, DBName: t.DBName, Username: opts.Credentials.AppUser, Password: opts.Credentials.AppPassword})
 	}
+	bench, err := targets.MeasureBench(ctx, opts.Targets, opts.Credentials)
+	if err != nil {
+		return fmt.Errorf("measure bench dataset: %w", err)
+	}
+	r.log.Info("bench dataset", "db", targets.BenchDBName, "table", targets.BenchTable,
+		"rows", bench.Rows, "unbatched_update_ms", bench.Duration.Milliseconds(), "statement", targets.BenchUnbatchedUpdate)
+	if bench.Duration <= time.Second {
+		r.log.Warn("unbatched update on the bench dataset took one second or less, raise targets.BenchRows")
+	}
+
 	// Sengaja menunjuk host yang tidak ada.
 	conns = append(conns, connSeed{Name: "Legacy ERP", Host: opts.Legacy, DBName: "erp", Username: "erp_reader", Password: "erp-reader-retired"})
 

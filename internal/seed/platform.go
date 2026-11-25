@@ -41,9 +41,9 @@ type groupSeed struct {
 
 var groupSeeds = []groupSeed{
 	{"backend", "Engineers who build the storefront and inventory services.", []string{"andi", "bayu", "eko"},
-		map[string]domain.AccessLevel{"Storefront": domain.LevelEdit, "Inventory": domain.LevelEdit, "Legacy ERP": domain.LevelView}},
+		map[string]domain.AccessLevel{"Storefront": domain.LevelEdit, "Inventory": domain.LevelEdit, "Bench": domain.LevelEdit, "Legacy ERP": domain.LevelView}},
 	{"data", "Analysts and data engineers.", []string{"bayu", "putri"},
-		map[string]domain.AccessLevel{"Storefront": domain.LevelView, "Inventory": domain.LevelView, "Billing": domain.LevelView, "Analytics": domain.LevelEdit, "Legacy ERP": domain.LevelView}},
+		map[string]domain.AccessLevel{"Storefront": domain.LevelView, "Inventory": domain.LevelView, "Billing": domain.LevelView, "Analytics": domain.LevelEdit, "Bench": domain.LevelView, "Legacy ERP": domain.LevelView}},
 	{"finance", "Billing, revenue, and reconciliation.", []string{"hendra"},
 		map[string]domain.AccessLevel{"Billing": domain.LevelEdit, "Storefront": domain.LevelView, "Analytics": domain.LevelView}},
 	{"hr", "People operations.", []string{"rina"},
