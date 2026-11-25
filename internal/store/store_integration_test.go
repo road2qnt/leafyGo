@@ -36,7 +36,10 @@ func testPool(t *testing.T) *store.Store {
 	st := store.New(pool)
 	if _, err := pool.Exec(ctx, `
 		truncate users, groups, group_members, db_connections, db_access, sessions,
-		         migration_history, migration_drafts`); err != nil {
+		         migration_history, migration_drafts,
+		         migration_definitions, migration_proposals, migration_proposal_approvers,
+		         migration_approvals, migration_executions, migration_jobs,
+		         database_migration_locks, worker_heartbeats cascade`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return st
@@ -1055,5 +1058,227 @@ func TestGetMigrationHistoryIncludesSQLAndFiltersDB(t *testing.T) {
 	}
 	if _, err := st.GetMigrationHistory(ctx, connB.ID, h.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("get with other db = %v; want ErrNotFound", err)
+	}
+}
+
+func TestGroupLeaderAssignmentAndRequiredApproverGroups(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+
+	leader := createUser(t, st, "leader1", false)
+	outsider := createUser(t, st, "outsider", false)
+	inactive := createUser(t, st, "inactive", false)
+	actor := createUser(t, st, "actor", true)
+	if err := st.SetUserActiveGuarded(ctx, inactive.ID, false, actor.ID); err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+
+	g, err := st.CreateGroup(ctx, "backend", "Backend team")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	// Non-member cannot be leader
+	if _, err := st.SetGroupLeader(ctx, g.ID, &outsider.ID); !errors.Is(err, store.ErrInvalidGroupLeader) {
+		t.Fatalf("outsider leader = %v; want ErrInvalidGroupLeader", err)
+	}
+
+	// Inactive member cannot be leader
+	if err := st.AddGroupMember(ctx, g.ID, inactive.ID); err != nil {
+		t.Fatalf("add inactive member: %v", err)
+	}
+	if _, err := st.SetGroupLeader(ctx, g.ID, &inactive.ID); !errors.Is(err, store.ErrInvalidGroupLeader) {
+		t.Fatalf("inactive leader = %v; want ErrInvalidGroupLeader", err)
+	}
+
+	// Active member can be leader
+	if err := st.AddGroupMember(ctx, g.ID, leader.ID); err != nil {
+		t.Fatalf("add active member: %v", err)
+	}
+	updated, err := st.SetGroupLeader(ctx, g.ID, &leader.ID)
+	if err != nil {
+		t.Fatalf("set active leader: %v", err)
+	}
+	if updated.LeaderID == nil || *updated.LeaderID != leader.ID || updated.LeaderUsername != "leader1" {
+		t.Fatalf("updated group leader = %+v", updated)
+	}
+
+	leaderGroups, err := st.ListUserLeaderGroupIDs(ctx, leader.ID)
+	if err != nil || len(leaderGroups) != 1 || leaderGroups[0] != g.ID {
+		t.Fatalf("ListUserLeaderGroupIDs = %v, %v", leaderGroups, err)
+	}
+
+	conn := createDB(t, st, "prod")
+	if err := st.SetGroupAccess(ctx, g.ID, conn.ID, domain.LevelEdit); err != nil {
+		t.Fatalf("set access: %v", err)
+	}
+	approvers, err := st.ListRequiredApproverGroups(ctx, conn.ID)
+	if err != nil || len(approvers) != 1 {
+		t.Fatalf("ListRequiredApproverGroups = %+v, %v", approvers, err)
+	}
+	if approvers[0].GroupID != g.ID || approvers[0].LeaderID == nil || *approvers[0].LeaderID != leader.ID || !approvers[0].LeaderActive || approvers[0].AccessLevel != domain.LevelEdit {
+		t.Fatalf("unexpected approver group: %+v", approvers[0])
+	}
+
+	// Removing member clears leader_id
+	if err := st.RemoveGroupMember(ctx, g.ID, leader.ID); err != nil {
+		t.Fatalf("remove leader member: %v", err)
+	}
+	afterRemove, err := st.GetGroup(ctx, g.ID)
+	if err != nil {
+		t.Fatalf("get group: %v", err)
+	}
+	if afterRemove.LeaderID != nil {
+		t.Fatalf("expected leader_id to be cleared after member removal, got %v", afterRemove.LeaderID)
+	}
+}
+
+func TestM2DeletionPolicyAndImmutabilityTriggers(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+
+	admin := createUser(t, st, "admin", true)
+	proposer := createUser(t, st, "proposer", false)
+	executorOnly := createUser(t, st, "executor_only", false)
+	cleanUser := createUser(t, st, "clean_user", false)
+
+	gWithHist, _ := st.CreateGroup(ctx, "dba-hist", "")
+	gClean, _ := st.CreateGroup(ctx, "dba-clean", "")
+	_ = st.AddGroupMember(ctx, gWithHist.ID, proposer.ID)
+	_, _ = st.SetGroupLeader(ctx, gWithHist.ID, &proposer.ID)
+
+	conn := createDB(t, st, "orders-db")
+	_ = st.SetGroupAccess(ctx, gWithHist.ID, conn.ID, domain.LevelEdit)
+
+	// Clean user can be hard-deleted
+	if err := st.DeleteUserGuarded(ctx, cleanUser.ID, admin.ID); err != nil {
+		t.Fatalf("delete clean user: %v", err)
+	}
+	if _, err := st.GetUserByID(ctx, cleanUser.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected clean user to be deleted, got %v", err)
+	}
+
+	// Clean group can be hard-deleted
+	if _, err := st.DeleteGroup(ctx, gClean.ID); err != nil {
+		t.Fatalf("delete clean group: %v", err)
+	}
+
+	// Insert migration_definition, proposal, proposal_approver, execution
+	defID := uuid.New()
+	_, err := st.Pool().Exec(ctx, `
+		insert into migration_definitions (id, db_id, seq_version, effective_seq, title, sql_up, sql_down, is_irreversible, created_by)
+		values ($1, $2, 1, 1, 'init', 'CREATE TABLE t(id int);', 'DROP TABLE t;', false, $3)`,
+		defID, conn.ID, proposer.ID)
+	if err != nil {
+		t.Fatalf("insert migration_definition: %v", err)
+	}
+
+	propID := uuid.New()
+	_, err = st.Pool().Exec(ctx, `
+		insert into migration_proposals (id, db_id, migration_id, migration_revision, action_type, status, proposed_by)
+		values ($1, $2, $3, 1, 'apply', 'pending_review', $4)`,
+		propID, conn.ID, defID, proposer.ID)
+	if err != nil {
+		t.Fatalf("insert migration_proposal: %v", err)
+	}
+
+	// Trigger trg_migration_definitions_immutable must reject spec modification while active proposal exists
+	if _, err := st.Pool().Exec(ctx, `update migration_definitions set sql_up = 'SELECT 2;' where id = $1`, defID); err == nil {
+		t.Fatal("expected trg_migration_definitions_immutable to block sql_up update while active proposal exists")
+	}
+
+	// Partial unique index migration_proposals_one_active_per_migration_idx must block second active proposal
+	if _, err := st.Pool().Exec(ctx, `
+		insert into migration_proposals (id, db_id, migration_id, migration_revision, action_type, status, proposed_by)
+		values ($1, $2, $3, 1, 'apply', 'pending_review', $4)`,
+		uuid.New(), conn.ID, defID, proposer.ID); err == nil {
+		t.Fatal("expected partial unique index to block second active proposal on same migration_id")
+	}
+
+	_, err = st.Pool().Exec(ctx, `
+		insert into migration_proposal_approvers (proposal_id, group_id, leader_id, access_level)
+		values ($1, $2, $3, 'edit')`, propID, gWithHist.ID, proposer.ID)
+	if err != nil {
+		t.Fatalf("insert migration_proposal_approvers: %v", err)
+	}
+
+	execID := uuid.New()
+	_, err = st.Pool().Exec(ctx, `
+		insert into migration_executions (
+			execution_id, root_execution_id, db_id, migration_id, proposal_id,
+			migration_revision, action_type, executed_sql, executed_by,
+			executed_by_username, db_name_snapshot, migration_title_snapshot, status
+		) values ($1, $1, $2, $3, $4, 1, 'apply', 'CREATE TABLE t(id int);', $5, 'executor_only', 'orders-db', 'init', 'success')`,
+		execID, conn.ID, defID, propID, executorOnly.ID)
+	if err != nil {
+		t.Fatalf("insert migration_execution: %v", err)
+	}
+
+	// User with proposal/definition/approver history cannot be hard-deleted -> ErrUserHasHistory
+	if err := st.DeleteUserGuarded(ctx, proposer.ID, admin.ID); !errors.Is(err, store.ErrUserHasHistory) {
+		t.Fatalf("delete user with history = %v; want ErrUserHasHistory", err)
+	}
+
+	// Group with approver history cannot be hard-deleted -> ErrGroupHasHistory
+	if _, err := st.DeleteGroup(ctx, gWithHist.ID); !errors.Is(err, store.ErrGroupHasHistory) {
+		t.Fatalf("delete group with history = %v; want ErrGroupHasHistory", err)
+	}
+
+	// User who ONLY appears in migration_executions.executed_by CAN be hard-deleted, setting executed_by = NULL while keeping executed_by_username
+	if err := st.DeleteUserGuarded(ctx, executorOnly.ID, admin.ID); err != nil {
+		t.Fatalf("delete executor_only user: %v", err)
+	}
+	var execBy *uuid.UUID
+	var execUsername string
+	if err := st.Pool().QueryRow(ctx, `select executed_by, executed_by_username from migration_executions where execution_id = $1`, execID).
+		Scan(&execBy, &execUsername); err != nil {
+		t.Fatalf("query execution after user delete: %v", err)
+	}
+	if execBy != nil || execUsername != "executor_only" {
+		t.Fatalf("expected executed_by=nil and executed_by_username='executor_only', got %v, %q", execBy, execUsername)
+	}
+
+	// Trigger trg_migration_executions_immutable must block DELETE and modification of executed_sql
+	if _, err := st.Pool().Exec(ctx, `delete from migration_executions where execution_id = $1`, execID); err == nil {
+		t.Fatal("expected trg_migration_executions_immutable to block DELETE")
+	}
+	if _, err := st.Pool().Exec(ctx, `update migration_executions set executed_sql = 'SELECT 99;' where execution_id = $1`, execID); err == nil {
+		t.Fatal("expected trg_migration_executions_immutable to block executed_sql update")
+	}
+
+	// Active job blocks DB delete with ErrDBHasActiveWork
+	jobID := uuid.New()
+	_, err = st.Pool().Exec(ctx, `
+		insert into migration_jobs (job_id, db_id, proposal_id, migration_id, execution_id, action_type, execution_mode, status)
+		values ($1, $2, $3, $4, $5, 'apply', 'normal', 'running')`,
+		jobID, conn.ID, propID, defID, execID)
+	if err != nil {
+		t.Fatalf("insert migration_job: %v", err)
+	}
+	if err := st.DeleteDBConnection(ctx, conn.ID); !errors.Is(err, store.ErrDBHasActiveWork) {
+		t.Fatalf("delete db with active job = %v; want ErrDBHasActiveWork", err)
+	}
+
+	// Finish job -> DB delete performs soft-delete (deleted_at IS NOT NULL) and allows reusing the name
+	if _, err := st.Pool().Exec(ctx, `update migration_jobs set status = 'success' where job_id = $1`, jobID); err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+	if err := st.DeleteDBConnection(ctx, conn.ID); err != nil {
+		t.Fatalf("soft-delete db with history: %v", err)
+	}
+	if _, err := st.GetDBConnection(ctx, conn.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("get soft-deleted db = %v; want ErrNotFound", err)
+	}
+
+	// History row still exists in DB!
+	var count int
+	if err := st.Pool().QueryRow(ctx, `select count(*) from migration_executions where execution_id = $1`, execID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("execution count after db soft-delete = %d, %v; want 1", count, err)
+	}
+
+	// Reusing the same database name after soft-delete succeeds!
+	reused := createDB(t, st, "orders-db")
+	if reused.ID == conn.ID {
+		t.Fatal("expected new UUID for reused DB name")
 	}
 }

@@ -172,3 +172,81 @@ func (s *Store) UpdateUserPassword(ctx context.Context, id uuid.UUID, hash strin
 	}
 	return nil
 }
+
+func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
+	return s.DeleteUserGuarded(ctx, id, uuid.Nil)
+}
+
+func (s *Store) DeleteUserGuarded(ctx context.Context, targetID, actorID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete user begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `
+		select id from users
+		where is_platform_admin and is_active
+		order by id
+		for update`)
+	if err != nil {
+		return fmt.Errorf("lock active admins: %w", err)
+	}
+	activeAdmins := 0
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan active admin: %w", err)
+		}
+		activeAdmins++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("lock active admins: %w", err)
+	}
+
+	var targetIsAdmin, targetIsActive bool
+	err = tx.QueryRow(ctx, `
+		select is_platform_admin, is_active from users where id=$1 for update`, targetID).
+		Scan(&targetIsAdmin, &targetIsActive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("load target user: %w", err)
+	}
+
+	if actorID != uuid.Nil && targetID == actorID {
+		return ErrSelfMutation
+	}
+	if targetIsAdmin && targetIsActive && activeAdmins <= 1 {
+		return ErrLastAdmin
+	}
+
+	var hasHistory bool
+	err = tx.QueryRow(ctx, `
+		select exists (
+			select 1 from migration_definitions where created_by = $1 or updated_by = $1
+			union all
+			select 1 from migration_proposals where proposed_by = $1
+			union all
+			select 1 from migration_proposal_approvers where leader_id = $1
+			union all
+			select 1 from migration_approvals where leader_id = $1
+		)`, targetID).Scan(&hasHistory)
+	if err != nil {
+		return fmt.Errorf("check user history: %w", err)
+	}
+	if hasHistory {
+		return ErrUserHasHistory
+	}
+
+	if _, err := tx.Exec(ctx, `delete from users where id=$1`, targetID); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete user commit: %w", err)
+	}
+	return nil
+}

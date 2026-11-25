@@ -13,14 +13,27 @@ type User struct {
 	PasswordHash    string
 	IsPlatformAdmin bool
 	IsActive        bool
+	LeaderOfGroups  []uuid.UUID
 	CreatedAt       time.Time
 }
 
 type Group struct {
-	ID          uuid.UUID
-	Name        string
-	Description string
-	CreatedAt   time.Time
+	ID             uuid.UUID
+	Name           string
+	Description    string
+	LeaderID       *uuid.UUID
+	LeaderUsername string
+	DeletedAt      *time.Time
+	CreatedAt      time.Time
+}
+
+type RequiredApproverGroup struct {
+	GroupID        uuid.UUID
+	GroupName      string
+	LeaderID       *uuid.UUID
+	LeaderUsername string
+	LeaderActive   bool
+	AccessLevel    AccessLevel
 }
 
 type DBConnection struct {
@@ -33,6 +46,7 @@ type DBConnection struct {
 	PasswordEnc []byte
 	SSLMode     string
 	CreatedBy   *uuid.UUID
+	DeletedAt   *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
