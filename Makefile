@@ -1,7 +1,10 @@
-.PHONY: run seed test test-integration vet
+.PHONY: run worker seed test test-integration vet
 
 run:
 	go run ./cmd/server
+
+worker:
+	go run ./cmd/worker
 
 seed:
 	go run ./cmd/seed

@@ -103,6 +103,30 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
 
+  worker:
+    build: .
+    entrypoint: ["/worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/leafygo?sslmode=disable
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      APP_ENV: ${APP_ENV:-development}
+      TARGET_CONNECT_TIMEOUT: ${TARGET_CONNECT_TIMEOUT:-}
+      WORKER_MAX_CONCURRENT_JOBS: ${WORKER_MAX_CONCURRENT_JOBS:-}
+      WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-}
+      WORKER_LEASE_TTL: ${WORKER_LEASE_TTL:-}
+      WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:-}
+      WORKER_RECOVERY_INTERVAL: ${WORKER_RECOVERY_INTERVAL:-}
+      WORKER_REPROBE_INTERVAL: ${WORKER_REPROBE_INTERVAL:-}
+      WORKER_PROBE_TIMEOUT: ${WORKER_PROBE_TIMEOUT:-}
+      WORKER_EXEC_TIMEOUT: ${WORKER_EXEC_TIMEOUT:-}
+      WORKER_SHUTDOWN_TIMEOUT: ${WORKER_SHUTDOWN_TIMEOUT:-}
+    stop_grace_period: 40s
+
 volumes:
   pgdata:
   targetsdata:
