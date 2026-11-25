@@ -1646,3 +1646,152 @@ func TestMultiGroupApprovalQuorumIntersectionPredecessorGateAndAutoEnqueue(t *te
 		t.Fatalf("expected prop2 job queue_seq (%d) > prop1 job queue_seq (%d)", res2Final.Job.QueueSeq, res1Final.Job.QueueSeq)
 	}
 }
+
+func TestActiveMigrationStackLIFORollbackLinearForwardAndBatchLineage(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+
+	leader := createUser(t, st, "leader", false)
+	conn := createDB(t, st, "stack-db")
+	grp, _ := st.CreateGroup(ctx, "dba", "")
+	_ = st.AddGroupMember(ctx, grp.ID, leader.ID)
+	_, _ = st.SetGroupLeader(ctx, grp.ID, &leader.ID)
+	_ = st.SetGroupAccess(ctx, grp.ID, conn.ID, domain.LevelEdit)
+
+	// Create A(1), B(2), C(3)
+	migA, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "A", SQLUp: "CREATE TABLE a(id int);", SQLDown: "DROP TABLE a;", CreatedBy: &leader.ID,
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	migB, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B", SQLUp: "CREATE TABLE b(id int);", SQLDown: "DROP TABLE b;", CreatedBy: &leader.ID,
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	migC, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "C", SQLUp: "CREATE TABLE c(id int);", SQLDown: "DROP TABLE c;", CreatedBy: &leader.ID,
+	})
+	if err != nil {
+		t.Fatalf("create C: %v", err)
+	}
+
+	// A succeeds, B fails
+	execA, err := st.InsertMigrationExecution(ctx, domain.MigrationExecution{
+		DBID: conn.ID, MigrationID: migA.ID, MigrationRevision: 1,
+		ActionType: domain.ActionApply, ExecutedSQL: migA.SQLUp,
+		ExecutedBy: &leader.ID, ExecutedByUsername: leader.Username,
+		DBNameSnapshot: conn.Name, MigrationTitleSnapshot: migA.Title,
+		Status: domain.StatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("insert execA: %v", err)
+	}
+	_, err = st.InsertMigrationExecution(ctx, domain.MigrationExecution{
+		DBID: conn.ID, MigrationID: migB.ID, MigrationRevision: 1,
+		ActionType: domain.ActionApply, ExecutedSQL: migB.SQLUp,
+		ExecutedBy: &leader.ID, ExecutedByUsername: leader.Username,
+		DBNameSnapshot: conn.Name, MigrationTitleSnapshot: migB.Title,
+		Status: domain.StatusFailed, ErrorMessage: "boom",
+	})
+	if err != nil {
+		t.Fatalf("insert execB failed: %v", err)
+	}
+
+	// Create B'(seq=4, eff=2) replacing B(2)
+	migBPrime, err := st.CreateMigrationDefinition(ctx, domain.MigrationDefinition{
+		DBID: conn.ID, Title: "B-prime", SQLUp: "CREATE TABLE b_fixed(id int);", SQLDown: "DROP TABLE b_fixed;",
+		ReplacesMigrationID: &migB.ID, CreatedBy: &leader.ID,
+	})
+	if err != nil {
+		t.Fatalf("create B': %v", err)
+	}
+	if migBPrime.SeqVersion != 4 || migBPrime.EffectiveSeq != 2 {
+		t.Fatalf("B' seq=%d eff=%d; want 4, 2", migBPrime.SeqVersion, migBPrime.EffectiveSeq)
+	}
+
+	// Activate B'(eff=2) then C(eff=3)
+	execBPrime, err := st.InsertMigrationExecution(ctx, domain.MigrationExecution{
+		DBID: conn.ID, MigrationID: migBPrime.ID, MigrationRevision: 1,
+		ActionType: domain.ActionApply, ExecutedSQL: migBPrime.SQLUp,
+		ExecutedBy: &leader.ID, ExecutedByUsername: leader.Username,
+		DBNameSnapshot: conn.Name, MigrationTitleSnapshot: migBPrime.Title,
+		Status: domain.StatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("insert execBPrime: %v", err)
+	}
+	if err := st.MarkSupersededChain(ctx, conn.ID, migBPrime.EffectiveSeq, migBPrime.ID); err != nil {
+		t.Fatalf("MarkSupersededChain: %v", err)
+	}
+	execC, err := st.InsertMigrationExecution(ctx, domain.MigrationExecution{
+		DBID: conn.ID, MigrationID: migC.ID, MigrationRevision: 1,
+		ActionType: domain.ActionApply, ExecutedSQL: migC.SQLUp,
+		ExecutedBy: &leader.ID, ExecutedByUsername: leader.Username,
+		DBNameSnapshot: conn.Name, MigrationTitleSnapshot: migC.Title,
+		Status: domain.StatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("insert execC: %v", err)
+	}
+
+	// Active stack order must be [A(eff=1), B'(eff=2), C(eff=3)]
+	stack, err := st.GetActiveMigrationStack(ctx, conn.ID)
+	if err != nil || len(stack) != 3 {
+		t.Fatalf("GetActiveMigrationStack = %+v, %v", stack, err)
+	}
+	if stack[0].Definition.ID != migA.ID || stack[1].Definition.ID != migBPrime.ID || stack[2].Definition.ID != migC.ID {
+		t.Fatalf("stack order = [%v, %v, %v]; want [A, B', C]",
+			stack[0].Definition.Title, stack[1].Definition.Title, stack[2].Definition.Title)
+	}
+
+	// LIFO Rollback target must be C(eff=3) first, NOT B'(raw seq=4, eff=2)!
+	top, err := st.GetTopActiveMigrationForRollback(ctx, conn.ID)
+	if err != nil || top == nil || top.Definition.ID != migC.ID || top.ActiveExecutionID != execC.ExecutionID {
+		t.Fatalf("GetTopActiveMigrationForRollback = %+v, %v; want C", top, err)
+	}
+
+	// Rollback C -> success; next LIFO Rollback target must be B'(eff=2)
+	_, err = st.InsertMigrationExecution(ctx, domain.MigrationExecution{
+		DBID: conn.ID, MigrationID: migC.ID, MigrationRevision: 1,
+		ActionType: domain.ActionRollback, ExecutedSQL: migC.SQLDown,
+		ExecutedBy: &leader.ID, ExecutedByUsername: leader.Username,
+		DBNameSnapshot: conn.Name, MigrationTitleSnapshot: migC.Title,
+		Status: domain.StatusSuccess, RollbackOfExecutionID: &execC.ExecutionID,
+	})
+	if err != nil {
+		t.Fatalf("insert rollback C: %v", err)
+	}
+	top2, err := st.GetTopActiveMigrationForRollback(ctx, conn.ID)
+	if err != nil || top2 == nil || top2.Definition.ID != migBPrime.ID || top2.ActiveExecutionID != execBPrime.ExecutionID {
+		t.Fatalf("GetTopActiveMigrationForRollback after C rolled back = %+v, %v; want B'", top2, err)
+	}
+
+	// Rollback B' -> success; now only A(eff=1) is Active.
+	// Linear Forward must select B'(eff=2) first before C(eff=3)!
+	_, err = st.InsertMigrationExecution(ctx, domain.MigrationExecution{
+		DBID: conn.ID, MigrationID: migBPrime.ID, MigrationRevision: 1,
+		ActionType: domain.ActionRollback, ExecutedSQL: migBPrime.SQLDown,
+		ExecutedBy: &leader.ID, ExecutedByUsername: leader.Username,
+		DBNameSnapshot: conn.Name, MigrationTitleSnapshot: migBPrime.Title,
+		Status: domain.StatusSuccess, RollbackOfExecutionID: &execBPrime.ExecutionID,
+	})
+	if err != nil {
+		t.Fatalf("insert rollback B': %v", err)
+	}
+	nextFwd, err := st.GetNextEligibleMigrationForForward(ctx, conn.ID)
+	if err != nil || nextFwd == nil || nextFwd.ID != migBPrime.ID {
+		t.Fatalf("GetNextEligibleMigrationForForward = %+v, %v; want B'(eff=2)", nextFwd, err)
+	}
+
+	// Verify ListMigrationExecutions returns all 6 attempts in descending seq_order
+	allExecs, err := st.ListMigrationExecutions(ctx, conn.ID)
+	if err != nil || len(allExecs) != 6 {
+		t.Fatalf("ListMigrationExecutions len = %d, %v; want 6", len(allExecs), err)
+	}
+	if allExecs[len(allExecs)-1].ExecutionID != execA.ExecutionID {
+		t.Fatalf("oldest execution = %v; want execA (%v)", allExecs[len(allExecs)-1].ExecutionID, execA.ExecutionID)
+	}
+}

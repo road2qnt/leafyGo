@@ -637,17 +637,11 @@ func (s *Store) GetMigrationDefinition(ctx context.Context, dbID, migrationID uu
 	if err != nil {
 		return domain.MigrationDefinition{}, err
 	}
-	if !def.IsSuperseded {
-		activeMap, err := s.loadActiveMigrationMapTx(ctx, s.pool, dbID)
-		if err != nil {
-			return domain.MigrationDefinition{}, err
-		}
-		if execID, ok := activeMap[def.ID]; ok {
-			def.IsActive = true
-			def.ActiveExecutionID = &execID
-		}
+	defs := []domain.MigrationDefinition{def}
+	if err := s.enrichMigrationDefinitions(ctx, dbID, defs); err != nil {
+		return domain.MigrationDefinition{}, err
 	}
-	return def, nil
+	return defs[0], nil
 }
 
 func (s *Store) ListMigrationDefinitions(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationDefinition, error) {
@@ -688,18 +682,103 @@ func (s *Store) ListMigrationDefinitions(ctx context.Context, dbID uuid.UUID) ([
 		return nil, fmt.Errorf("iterate migration_definitions: %w", err)
 	}
 
-	activeMap, err := s.loadActiveMigrationMapTx(ctx, s.pool, dbID)
-	if err != nil {
+	if err := s.enrichMigrationDefinitions(ctx, dbID, defs); err != nil {
 		return nil, err
 	}
+	return defs, nil
+}
+
+func (s *Store) enrichMigrationDefinitions(ctx context.Context, dbID uuid.UUID, defs []domain.MigrationDefinition) error {
+	if len(defs) == 0 {
+		return nil
+	}
+	activeMap, err := s.loadActiveMigrationMapTx(ctx, s.pool, dbID)
+	if err != nil {
+		return err
+	}
+
+	// Latest proposal per migration_id
+	prows, err := s.pool.Query(ctx, `
+		select distinct on (p.migration_id)
+		       p.id, p.db_id, p.migration_id, p.migration_revision,
+		       p.action_type, p.target_execution_id, p.resolution, p.reason,
+		       p.status, p.proposed_by, coalesce(u.username, ''),
+		       p.created_at, p.updated_at
+		from migration_proposals p
+		left join users u on u.id = p.proposed_by
+		where p.db_id = $1
+		order by p.migration_id, p.created_at desc`, dbID)
+	if err != nil {
+		return fmt.Errorf("query latest proposals for definitions: %w", err)
+	}
+	latestProposalMap := make(map[uuid.UUID]domain.MigrationProposal)
+	for prows.Next() {
+		var r proposalRow
+		if err := prows.Scan(
+			&r.ID, &r.DBID, &r.MigrationID, &r.MigrationRevision,
+			&r.ActionType, &r.TargetExecutionID, &r.Resolution, &r.Reason,
+			&r.Status, &r.ProposedBy, &r.ProposedByUsername,
+			&r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			prows.Close()
+			return fmt.Errorf("scan latest proposal: %w", err)
+		}
+		latestProposalMap[r.MigrationID] = r.toDomain()
+	}
+	prows.Close()
+	if err := prows.Err(); err != nil {
+		return fmt.Errorf("iterate latest proposals: %w", err)
+	}
+
+	// Latest execution per migration_id
+	erows, err := s.pool.Query(ctx, `
+		select distinct on (e.migration_id) `+selectMigrationExecutionCols+`
+		from migration_executions e
+		join migration_definitions d on d.id = e.migration_id
+		where e.db_id = $1
+		order by e.migration_id, e.seq_order desc`, dbID)
+	if err != nil {
+		return fmt.Errorf("query latest executions for definitions: %w", err)
+	}
+	latestExecMap := make(map[uuid.UUID]domain.MigrationExecution)
+	for erows.Next() {
+		var r migrationExecutionRow
+		if err := erows.Scan(
+			&r.ExecutionID, &r.RootExecutionID, &r.DBID, &r.MigrationID, &r.ProposalID,
+			&r.SeqOrder, &r.SeqVersion, &r.EffectiveSeq, &r.MigrationRevision,
+			&r.ActionType, &r.ExecutionMode, &r.ExecutedSQL, &r.ExecutedBy,
+			&r.ExecutedByUsername, &r.DBNameSnapshot, &r.MigrationTitleSnapshot,
+			&r.StartedAt, &r.FinishedAt, &r.DurationMS, &r.Status, &r.ErrorMessage,
+			&r.RollbackOfExecutionID, &r.CommittedBatches, &r.TotalBatches, &r.CommittedRows,
+			&r.IsSuperseded, &r.SupersededByID, &r.CreatedAt,
+		); err != nil {
+			erows.Close()
+			return fmt.Errorf("scan latest execution: %w", err)
+		}
+		latestExecMap[r.MigrationID] = r.toDomain()
+	}
+	erows.Close()
+	if err := erows.Err(); err != nil {
+		return fmt.Errorf("iterate latest executions: %w", err)
+	}
+
 	for i := range defs {
+		id := defs[i].ID
 		if !defs[i].IsSuperseded {
-			if execID, ok := activeMap[defs[i].ID]; ok {
+			if execID, ok := activeMap[id]; ok {
 				defs[i].IsActive = true
 				defs[i].ActiveExecutionID = &execID
 			}
 		}
+		if lp, ok := latestProposalMap[id]; ok {
+			lpCopy := lp
+			defs[i].LatestProposal = &lpCopy
+		}
+		if le, ok := latestExecMap[id]; ok {
+			leCopy := le
+			defs[i].LatestExecution = &leCopy
+		}
 	}
-	return defs, nil
+	return nil
 }
 

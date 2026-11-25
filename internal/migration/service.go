@@ -39,7 +39,7 @@ type Options struct {
 	DryRunUserCooldown  time.Duration
 }
 
-// WorkflowStore defines the Milestone 2 store operations used by Service for definitions, proposals, and approvals.
+// WorkflowStore defines the Milestone 2 store operations used by Service for definitions, proposals, approvals, and execution history.
 type WorkflowStore interface {
 	CreateMigrationDefinition(ctx context.Context, def domain.MigrationDefinition) (domain.MigrationDefinition, error)
 	UpdateMigrationDefinition(ctx context.Context, def domain.MigrationDefinition) (domain.MigrationDefinition, error)
@@ -51,16 +51,21 @@ type WorkflowStore interface {
 	WithdrawProposal(ctx context.Context, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error)
 	ApproveProposal(ctx context.Context, in store.ApproveProposalInput) (store.ApproveProposalResult, error)
 	RejectProposal(ctx context.Context, in store.ApproveProposalInput) (domain.MigrationProposal, error)
+	ListMigrationExecutions(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationExecution, error)
+	GetMigrationExecution(ctx context.Context, dbID, executionID uuid.UUID) (domain.MigrationExecution, error)
+	GetActiveMigrationStack(ctx context.Context, dbID uuid.UUID) ([]store.ActiveStackEntry, error)
+	GetTopActiveMigrationForRollback(ctx context.Context, dbID uuid.UUID) (*store.ActiveStackEntry, error)
+	GetNextEligibleMigrationForForward(ctx context.Context, dbID uuid.UUID) (*domain.MigrationDefinition, error)
 }
 
 type Service struct {
-	store        HistoryStore
-	workflow     WorkflowStore
-	runner       Runner
-	connOpener   DedicatedConnOpener
-	dryRunGuard  *DryRunGuard
-	sem          chan struct{}
-	opts         Options
+	store       HistoryStore
+	workflow    WorkflowStore
+	runner      Runner
+	connOpener  DedicatedConnOpener
+	dryRunGuard *DryRunGuard
+	sem         chan struct{}
+	opts        Options
 }
 
 func NewService(st HistoryStore, runner Runner, opts Options) *Service {
@@ -337,6 +342,67 @@ func (s *Service) RejectProposal(ctx context.Context, in store.ApproveProposalIn
 		return domain.MigrationProposal{}, mapStoreWorkflowError(err)
 	}
 	return prop, nil
+}
+
+func (s *Service) CreateDefinition(ctx context.Context, actor domain.User, level domain.AccessLevel, def domain.MigrationDefinition) (domain.MigrationDefinition, error) {
+	if actor.IsPlatformAdmin || level < domain.LevelEdit {
+		return domain.MigrationDefinition{}, ErrForbidden
+	}
+	if s.workflow == nil {
+		return domain.MigrationDefinition{}, errors.New("workflow store not configured")
+	}
+	def.CreatedBy = &actor.ID
+	def.UpdatedBy = &actor.ID
+	created, err := s.workflow.CreateMigrationDefinition(ctx, def)
+	if err != nil {
+		return domain.MigrationDefinition{}, mapStoreWorkflowError(err)
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateDefinition(ctx context.Context, actor domain.User, level domain.AccessLevel, def domain.MigrationDefinition) (domain.MigrationDefinition, error) {
+	if actor.IsPlatformAdmin || level < domain.LevelEdit {
+		return domain.MigrationDefinition{}, ErrForbidden
+	}
+	if s.workflow == nil {
+		return domain.MigrationDefinition{}, errors.New("workflow store not configured")
+	}
+	def.UpdatedBy = &actor.ID
+	updated, err := s.workflow.UpdateMigrationDefinition(ctx, def)
+	if err != nil {
+		return domain.MigrationDefinition{}, mapStoreWorkflowError(err)
+	}
+	return updated, nil
+}
+
+// ListHistory returns all migration execution attempts for dbID, filtered with FilterHistoryExecutions
+// when hideRollback is true. Requires LevelView+ access (and rejects PlatformAdmin).
+func (s *Service) ListHistory(ctx context.Context, actor domain.User, level domain.AccessLevel, dbID uuid.UUID, hideRollback bool) ([]domain.MigrationExecution, error) {
+	if actor.IsPlatformAdmin || level < domain.LevelView {
+		return nil, ErrForbidden
+	}
+	if s.workflow == nil {
+		return nil, errors.New("workflow store not configured")
+	}
+	execs, err := s.workflow.ListMigrationExecutions(ctx, dbID)
+	if err != nil {
+		return nil, mapStoreWorkflowError(err)
+	}
+	return FilterHistoryExecutions(execs, hideRollback), nil
+}
+
+func (s *Service) GetHistoryExecution(ctx context.Context, actor domain.User, level domain.AccessLevel, dbID, executionID uuid.UUID) (domain.MigrationExecution, error) {
+	if actor.IsPlatformAdmin || level < domain.LevelView {
+		return domain.MigrationExecution{}, ErrForbidden
+	}
+	if s.workflow == nil {
+		return domain.MigrationExecution{}, errors.New("workflow store not configured")
+	}
+	exec, err := s.workflow.GetMigrationExecution(ctx, dbID, executionID)
+	if err != nil {
+		return domain.MigrationExecution{}, mapStoreWorkflowError(err)
+	}
+	return exec, nil
 }
 
 type ExecuteInput struct {
