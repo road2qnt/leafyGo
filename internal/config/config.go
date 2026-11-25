@@ -42,6 +42,21 @@ type Config struct {
 	QueryMaxCellBytes   int64
 	QueryMaxResultBytes int64
 	QueryMaxConcurrent  int
+
+	Worker WorkerConfig
+}
+
+type WorkerConfig struct {
+	ID                string
+	MaxConcurrentJobs int
+	PollInterval      time.Duration
+	LeaseTTL          time.Duration
+	HeartbeatInterval time.Duration
+	RecoveryInterval  time.Duration
+	ReprobeInterval   time.Duration
+	ProbeTimeout      time.Duration
+	ExecTimeout       time.Duration
+	ShutdownTimeout   time.Duration
 }
 
 func Load() (Config, error) {
@@ -132,6 +147,10 @@ func Load() (Config, error) {
 		return Config{}, errors.New("UI_PREVIEW must not be enabled in production")
 	}
 
+	if cfg.Worker, err = loadWorkerConfig(); err != nil {
+		return Config{}, err
+	}
+
 	key, err := decodeKey(os.Getenv("ENCRYPTION_KEY"))
 	if err != nil {
 		return Config{}, err
@@ -139,6 +158,38 @@ func Load() (Config, error) {
 	cfg.EncryptionKey = key
 
 	return cfg, nil
+}
+
+func loadWorkerConfig() (WorkerConfig, error) {
+	w := WorkerConfig{ID: os.Getenv("WORKER_ID")}
+	maxJobs, err := positiveInt64Env("WORKER_MAX_CONCURRENT_JOBS", 4)
+	if err != nil {
+		return WorkerConfig{}, err
+	}
+	w.MaxConcurrentJobs = int(maxJobs)
+	durations := []struct {
+		dst      *time.Duration
+		key      string
+		fallback time.Duration
+	}{
+		{&w.PollInterval, "WORKER_POLL_INTERVAL", 2 * time.Second},
+		{&w.LeaseTTL, "WORKER_LEASE_TTL", 15 * time.Second},
+		{&w.HeartbeatInterval, "WORKER_HEARTBEAT_INTERVAL", 5 * time.Second},
+		{&w.RecoveryInterval, "WORKER_RECOVERY_INTERVAL", 5 * time.Second},
+		{&w.ReprobeInterval, "WORKER_REPROBE_INTERVAL", 15 * time.Second},
+		{&w.ProbeTimeout, "WORKER_PROBE_TIMEOUT", 10 * time.Second},
+		{&w.ExecTimeout, "WORKER_EXEC_TIMEOUT", 30 * time.Minute},
+		{&w.ShutdownTimeout, "WORKER_SHUTDOWN_TIMEOUT", 30 * time.Second},
+	}
+	for _, d := range durations {
+		if *d.dst, err = durationEnv(d.key, d.fallback); err != nil {
+			return WorkerConfig{}, err
+		}
+	}
+	if w.HeartbeatInterval >= w.LeaseTTL {
+		return WorkerConfig{}, errors.New("WORKER_HEARTBEAT_INTERVAL must be shorter than WORKER_LEASE_TTL")
+	}
+	return w, nil
 }
 
 func env(key, fallback string) string {
