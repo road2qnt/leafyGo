@@ -204,13 +204,18 @@ func TestAPIApprovalWorkflowQuorumIntersectionPredecessorGateAndHoldProposals(t 
 
 	// Hold-State Recovery Proposals: transition prop1/exec1/job1 to 'partial' (and mark def1 immutable),
 	// then verify submitting batch_retry / batch_revert on the same migration_id SUCCEEDS (no 409 DUPLICATE_ACTIVE_PROPOSAL)!
-	if _, err := st.Pool().Exec(ctx, `
-		update migration_definitions set is_immutable = true where id = $1;
-		update migration_proposals set status = 'partial' where id = $2;
-		update migration_executions set status = 'partial' where execution_id = $3;
-		update migration_jobs set status = 'partial' where execution_id = $3;
-	`, def1.ID, prop1.ID, exec1ID); err != nil {
-		t.Fatalf("set partial hold state: %v", err)
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`update migration_definitions set is_immutable = true where id = $1`, []any{def1.ID}},
+		{`update migration_proposals set status = 'partial' where id = $1`, []any{prop1.ID}},
+		{`update migration_executions set status = 'partial' where execution_id = $1`, []any{exec1ID}},
+		{`update migration_jobs set status = 'partial' where execution_id = $1`, []any{exec1ID}},
+	} {
+		if _, err := st.Pool().Exec(ctx, stmt.sql, stmt.args...); err != nil {
+			t.Fatalf("set partial hold state (%s): %v", stmt.sql, err)
+		}
 	}
 
 	recRetryProp := apiRequestJSON(t, srv, http.MethodPost, migBase+"/proposals", leSID, leCSRF, map[string]any{

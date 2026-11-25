@@ -72,10 +72,14 @@ Semua parameter terdapat di `.env.example`. Yang paling relevan:
 | `QUERY_MAX_RESULT_BYTES`   | 2097152                        | Batas akumulasi ukuran hasil (2 MiB)        |
 | `QUERY_MAX_CONCURRENT`     | 4                              | Batas query console konkuren global         |
 
-## Dokumentasi
+## Dokumentasi & Keamanan (Milestone 2 CodeQL SAST)
 
 Parameter session, rotasi, pencabutan akses, CSRF, akses efektif, dan matriks aksi terdapat di
 [docs/keamanan-dan-akses.md](docs/keamanan-dan-akses.md).
+
+Hasil lengkap audit Static Application Security Testing (SAST) menggunakan **GitHub CodeQL** (`security-extended` & `security-and-quality` untuk `go` dan `javascript-typescript`), pemetaan CWE / OWASP Top 10, mitigasi kontrol berlapis (`RejectTxControl`, `pgx.Identifier.Sanitize()`, `BEGIN ... ROLLBACK` dry-run, Multi-Group Leader Approval, dan database immutability triggers), serta bukti re-scan didokumentasikan di:
+- Workflow CI: [.github/workflows/codeql.yml](.github/workflows/codeql.yml)
+- Laporan Audit SAST: [tests/security/CODEQL_REPORT.md](tests/security/CODEQL_REPORT.md)
 
 Isi data seed, daftar user, dan
 ketentuan reset ada di [docs/seed.md](docs/seed.md).

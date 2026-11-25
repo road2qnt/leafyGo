@@ -198,6 +198,14 @@ func TestAPIRollbackForwardEffectiveSeqRelaxedSupersedeAndDeletionPolicies(t *te
 	}
 
 	// 5. Deletion Policies via /api/v1/admin/* & Trigger trg_migration_executions_immutable
+	// Direct DELETE or modification of executed_sql on migration_executions is rejected by trg_migration_executions_immutable
+	if _, err := st.Pool().Exec(ctx, `delete from migration_executions where execution_id = $1`, execA.ExecutionID); err == nil {
+		t.Fatal("expected trg_migration_executions_immutable to reject DELETE on migration_executions")
+	}
+	if _, err := st.Pool().Exec(ctx, `update migration_executions set executed_sql = 'SELECT 999;' where execution_id = $1`, execA.ExecutionID); err == nil {
+		t.Fatal("expected trg_migration_executions_immutable to reject modifying executed_sql on migration_executions")
+	}
+
 	// Deleting user with proposal/definition history -> 409 USER_HAS_HISTORY
 	recDelLeader := apiRequestJSON(t, srv, http.MethodDelete, "/api/v1/admin/users/"+leader.ID.String(), adminSID, adminCSRF, nil)
 	assertAPIErrorCode(t, recDelLeader, http.StatusConflict, ErrCodeUserHasHistory)
@@ -219,12 +227,18 @@ func TestAPIRollbackForwardEffectiveSeqRelaxedSupersedeAndDeletionPolicies(t *te
 	// Deleting DB while active lock/job exists -> 409 DB_HAS_ACTIVE_WORK
 	propActiveID := uuid.New()
 	jobActiveID := uuid.New()
-	_, _ = st.Pool().Exec(ctx, `
+	if _, err := st.Pool().Exec(ctx, `
 		insert into migration_proposals (id, db_id, migration_id, migration_revision, action_type, status)
-		values ($1, $2, $3, 1, 'apply', 'running');
+		values ($1, $2, $3, 1, 'apply', 'running')`,
+		propActiveID, dbConn.ID, migB2.ID); err != nil {
+		t.Fatalf("insert running proposal: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `
 		insert into migration_jobs (job_id, db_id, proposal_id, migration_id, execution_id, action_type, execution_mode, status)
-		values ($4, $2, $1, $3, $5, 'apply', 'normal', 'running');
-	`, propActiveID, dbConn.ID, migB2.ID, jobActiveID, execA.ExecutionID)
+		values ($1, $2, $3, $4, $5, 'apply', 'normal', 'running')`,
+		jobActiveID, dbConn.ID, propActiveID, migB2.ID, execA.ExecutionID); err != nil {
+		t.Fatalf("insert running job: %v", err)
+	}
 
 	recDelDBBusy := apiRequestJSON(t, srv, http.MethodDelete, "/api/v1/admin/databases/"+dbConn.ID.String(), adminSID, adminCSRF, nil)
 	assertAPIErrorCode(t, recDelDBBusy, http.StatusConflict, ErrCodeDBHasActiveWork)
