@@ -84,7 +84,7 @@ func (s *Service) Execute(ctx context.Context, in ExecuteInput) (Result, error) 
 	select {
 	case s.sem <- struct{}{}:
 	case <-semCtx.Done():
-		s.logger.Warn("query console concurrency saturated",
+		s.logger.WarnContext(ctx, "query console concurrency saturated",
 			"db_id", in.DB.ID.String(),
 			"actor_id", in.Actor.ID.String(),
 			"status", "busy",
@@ -112,7 +112,7 @@ func (s *Service) Execute(ctx context.Context, in ExecuteInput) (Result, error) 
 		if errorsAs(execErr, &tgtErr) && len(tgtErr.Code) >= 2 {
 			sqlStateClass = tgtErr.Code[:2]
 		}
-		s.logger.Warn("query console execution failed",
+		s.logger.WarnContext(ctx, "query console execution failed",
 			"db_id", in.DB.ID.String(),
 			"actor_id", in.Actor.ID.String(),
 			"duration_ms", duration.Milliseconds(),
@@ -122,7 +122,7 @@ func (s *Service) Execute(ctx context.Context, in ExecuteInput) (Result, error) 
 		return Result{}, execErr
 	}
 
-	s.logger.Info("query console execution succeeded",
+	s.logger.InfoContext(ctx, "query console execution succeeded",
 		"db_id", in.DB.ID.String(),
 		"actor_id", in.Actor.ID.String(),
 		"duration_ms", res.Duration.Milliseconds(),

@@ -66,7 +66,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("login lookup", "error", err)
+		s.logger.ErrorContext(r.Context(), "login lookup", "error", err)
 		s.renderError(w, r, http.StatusInternalServerError, "Could not process sign-in.")
 		return
 	}
@@ -90,7 +90,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, _, err := s.sessions.Create(r.Context(), user.ID)
 	if err != nil {
-		s.logger.Error("create session", "error", err)
+		s.logger.ErrorContext(r.Context(), "create session", "error", err)
 		s.renderError(w, r, http.StatusInternalServerError, "Could not create a session.")
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("sid"); err == nil && cookie.Value != "" {
 		if err := s.sessions.Revoke(r.Context(), cookie.Value); err != nil {
-			s.logger.Error("revoke session", "error", err)
+			s.logger.ErrorContext(r.Context(), "revoke session", "error", err)
 		}
 	}
 	s.clearSessionCookie(w)
@@ -115,7 +115,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	dbs, err := s.store.ListAccessibleDBs(r.Context(), user.ID)
 	if err != nil {
-		s.logger.Error("list accessible databases", "error", err)
+		s.logger.ErrorContext(r.Context(), "list accessible databases", "error", err)
 		s.renderError(w, r, http.StatusInternalServerError, "Could not load the database list.")
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"go.opentelemetry.io/otel"
@@ -75,7 +76,7 @@ func NewTracerProvider(ctx context.Context, opts TracerOptions) (*TracerProvider
 	if opts.Console {
 		writer := opts.ConsoleWriter
 		if writer == nil {
-			writer = io.Discard
+			writer = os.Stdout
 		}
 		exporter, err := stdouttrace.New(stdouttrace.WithWriter(writer))
 		if err != nil {

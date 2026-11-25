@@ -32,6 +32,12 @@ export default function QueryConsolePage() {
 
   const canEdit = overview.level === "edit";
 
+  useEffect(() => {
+    setResult(null);
+    setPlan(null);
+    setError(null);
+  }, [dbId]);
+
   const run = async () => {
     if (!sql.trim() || running) return;
     setRunning(true);

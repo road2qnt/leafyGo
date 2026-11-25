@@ -45,6 +45,11 @@ export default function SchemaPage() {
     }
   }, [selected, tables]);
 
+  useEffect(() => {
+    setSelected("");
+    setFilter("");
+  }, [dbId]);
+
   const activeTable = tables.find((table) => table.name === selected) ?? tables[0];
 
   if (schemaQuery.isLoading) return <PageLoader label="Reading target catalog" />;

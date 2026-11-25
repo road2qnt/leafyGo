@@ -42,11 +42,12 @@ import {
 } from "../../components/ui";
 import { useToast } from "../../hooks/useToast";
 import { formatDateTime, formatDuration, formatNumber, formatRelative, truncateMiddle } from "../../lib/format";
+import { jobActions } from "../../lib/jobActions";
 import { actionLabel, isActiveJob, JOB_STATUS_META } from "../../lib/status";
 import { useDatabaseContext } from "./context";
 import { ResolveUncertainModal } from "./ResolveUncertainModal";
 
-type ProposalAction = Extract<ActionType, "batch_retry" | "batch_revert" | "rollback">;
+type ProposalAction = Extract<ActionType, "batch_retry" | "batch_revert" | "rollback" | "forward">;
 
 const proposalCopy: Record<ProposalAction, { title: string; description: string; confirm: string }> = {
   batch_retry: {
@@ -66,6 +67,12 @@ const proposalCopy: Record<ProposalAction, { title: string; description: string;
     description:
       "LIFO rollback is only allowed when this migration is the highest active effective_seq. The rollback still needs leader approval.",
     confirm: "Request rollback",
+  },
+  forward: {
+    title: "Forward this migration again",
+    description:
+      "A forward proposal re-applies a migration whose latest successful attempt was a normal rollback. It must respect linear effective_seq order.",
+    confirm: "Request forward",
   },
 };
 
@@ -121,6 +128,7 @@ export default function JobMonitorPage() {
   const { job, attempts, progress, lock_state } = detailQuery.data;
   const meta = JOB_STATUS_META[job.status];
   const canEdit = overview.level === "edit";
+  const actions = jobActions(job.status, lock_state, job.action_type);
   const executionId = job.execution_id || attempts[0]?.execution_id;
 
   const propose = async () => {
@@ -179,22 +187,27 @@ export default function JobMonitorPage() {
             <Button variant="secondary" onClick={() => void detailQuery.refetch()}>
               <RefreshCcw className="h-4 w-4" /> Refresh
             </Button>
-            {canEdit && ["partial", "partially_reverted"].includes(job.status) ? (
+            {canEdit && actions.retry ? (
               <Button variant="secondary" onClick={() => { setProposalAction("batch_retry"); setProposalError(null); }}>
                 <RotateCcw className="h-4 w-4" /> Retry batches
               </Button>
             ) : null}
-            {canEdit && ["partial", "partially_reverted"].includes(job.status) ? (
+            {canEdit && actions.revert ? (
               <Button variant="secondary" onClick={() => { setProposalAction("batch_revert"); setProposalError(null); }}>
                 <Undo2 className="h-4 w-4" /> Revert batches
               </Button>
             ) : null}
-            {canEdit && job.status === "success" ? (
+            {canEdit && actions.rollback ? (
               <Button onClick={() => { setProposalAction("rollback"); setProposalError(null); }}>
                 <Undo2 className="h-4 w-4" /> Propose rollback
               </Button>
             ) : null}
-            {canEdit && job.status === "uncertain" ? (
+            {canEdit && actions.forward ? (
+              <Button onClick={() => { setProposalAction("forward"); setProposalError(null); }}>
+                <RotateCcw className="h-4 w-4" /> Propose forward
+              </Button>
+            ) : null}
+            {canEdit && actions.resolve ? (
               <Button variant="danger" onClick={() => setResolveOpen(true)}>
                 <ShieldQuestion className="h-4 w-4" /> Resolve uncertain
               </Button>

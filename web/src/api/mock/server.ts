@@ -423,7 +423,7 @@ function databaseOverview(dbId: string): DatabaseOverview {
     .sort((a, b) => b.seq_order - a.seq_order)
     .slice(0, 6);
   return {
-    database: { ...database, level },
+    database: { ...database, level: undefined, lock_state: undefined },
     level,
     lock_state: database.lock_state ?? null,
     active_job: activeJob,

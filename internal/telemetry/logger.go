@@ -286,21 +286,28 @@ func isSensitiveKey(key string) bool {
 }
 
 var (
-	sqlPasswordLiteral = regexp.MustCompile(`(?i)\b(ENCRYPTED\s+PASSWORD|PASSWORD|SECRET|TOKEN|API_KEY)(\s*(?:=|:|\s)\s*)'((?:[^']|'')*)'`)
+	sqlPasswordLiteral = regexp.MustCompile(`(?i)\b(ENCRYPTED\s+PASSWORD|PASSWORD(?:_HASH|_ENC)?|SECRET|TOKEN|API_KEY)(\s*(?:=|:|\s)\s*)(E?)'((?:[^']|'')*)'`)
+	sqlDollarLiteral   = regexp.MustCompile(`(?i)\b(ENCRYPTED\s+PASSWORD|PASSWORD(?:_HASH|_ENC)?|SECRET|TOKEN|API_KEY)(\s*(?:=|:|\s)\s*)\$[A-Za-z0-9_]*\$[^$]*\$[A-Za-z0-9_]*\$`)
 	sqlPGPSymmetric    = regexp.MustCompile(`(?i)(pgp_sym_(?:encrypt|decrypt)\s*\([^,]+,\s*)'((?:[^']|'')*)'`)
 	dsnPassword        = regexp.MustCompile(`(?i)\b(postgres(?:ql)?://[^:/@\s]+:)([^@\s]+)(@)`)
-	keyValuePassword   = regexp.MustCompile(`(?i)\b(password|passwd|pwd)\s*=\s*('[^']*'|[^\s;]+)`)
+	keyValuePassword   = regexp.MustCompile(`(?i)\b(password(?:_hash|_enc)?|passwd|pwd|secret|token|api_key)\s*=\s*([^\s;']+)`)
+	pgKeyDetail        = regexp.MustCompile(`(?i)\bKey\s*\(([^)]*)\)\s*=\s*\(([^)]*)\)`)
+	pgFailingRow       = regexp.MustCompile(`(?i)Failing row contains\s*\([^)]*\)`)
 )
 
-// Sanitize redacts credential literals from SQL text, DSNs, and key/value pairs.
+// Sanitize redacts credential literals and target-row detail from SQL text,
+// DSNs, key/value pairs, and PostgreSQL error details.
 func Sanitize(text string) string {
 	if text == "" {
 		return text
 	}
-	text = sqlPasswordLiteral.ReplaceAllString(text, `${1}${2}'[REDACTED]'`)
+	text = sqlDollarLiteral.ReplaceAllString(text, `${1}${2}$[REDACTED]$`)
+	text = sqlPasswordLiteral.ReplaceAllString(text, `${1}${2}${3}'[REDACTED]'`)
 	text = sqlPGPSymmetric.ReplaceAllString(text, `${1}'[REDACTED]'`)
 	text = dsnPassword.ReplaceAllString(text, `${1}[REDACTED]${3}`)
 	text = keyValuePassword.ReplaceAllString(text, `${1}=[REDACTED]`)
+	text = pgKeyDetail.ReplaceAllString(text, `Key ($1)=([REDACTED])`)
+	text = pgFailingRow.ReplaceAllString(text, `Failing row contains ([REDACTED])`)
 	return text
 }
 

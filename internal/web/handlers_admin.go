@@ -37,7 +37,7 @@ func (s *Server) redirectFlash(w http.ResponseWriter, r *http.Request, to, kind,
 }
 
 func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
-	s.logger.Error(what, "error", err)
+	s.logger.ErrorContext(r.Context(), what, "error", err)
 	s.renderError(w, r, http.StatusInternalServerError, "Something went wrong. Try again.")
 }
 

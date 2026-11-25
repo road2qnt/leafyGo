@@ -41,6 +41,7 @@ func run() error {
 		Level:   slog.LevelInfo,
 	})
 	slog.SetDefault(logger)
+	telemetry.SetDefaultLogger(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -50,6 +51,7 @@ func run() error {
 		ServiceVersion: serviceVersion,
 		Env:            cfg.AppEnv,
 		Console:        cfg.OTELConsole,
+		ConsoleWriter:  os.Stdout,
 		OTLPEndpoint:   cfg.OTLPEndpoint,
 		SampleRatio:    cfg.OTELSampleRatio,
 	})

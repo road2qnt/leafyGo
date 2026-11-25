@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel/trace"
@@ -164,6 +165,42 @@ func TestSanitizeRedactsCredentialsInSQLAndDSN(t *testing.T) {
 			secrets: []string{"topsecret"},
 			want:    []string{"password=[REDACTED]"},
 		},
+		{
+			name:    "password hash column",
+			input:   `UPDATE users SET password_hash = '$2a$12$abcdef' WHERE id = 1`,
+			secrets: []string{"$2a$12$abcdef"},
+			want:    []string{"password_hash = '[REDACTED]'"},
+		},
+		{
+			name:    "password enc column",
+			input:   `UPDATE db_connections SET password_enc = 'ciphertext' WHERE id = 1`,
+			secrets: []string{"ciphertext"},
+			want:    []string{"password_enc = '[REDACTED]'"},
+		},
+		{
+			name:    "escape string password",
+			input:   `CREATE ROLE app PASSWORD E'escaped-secret'`,
+			secrets: []string{"escaped-secret"},
+			want:    []string{"PASSWORD E'[REDACTED]'"},
+		},
+		{
+			name:    "dollar quoted password",
+			input:   `CREATE ROLE app PASSWORD $tag$dollar-secret$tag$`,
+			secrets: []string{"dollar-secret"},
+			want:    []string{"PASSWORD $[REDACTED]$"},
+		},
+		{
+			name:    "postgres key detail",
+			input:   `duplicate key value violates unique constraint: Key (email)=(alice@example.com) already exists.`,
+			secrets: []string{"alice@example.com"},
+			want:    []string{"Key (email)=([REDACTED])"},
+		},
+		{
+			name:    "postgres failing row detail",
+			input:   `null value in column "email" violates not-null constraint: Failing row contains (1, alice@example.com, NULL).`,
+			secrets: []string{"alice@example.com"},
+			want:    []string{"Failing row contains ([REDACTED])"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -230,6 +267,20 @@ func TestLogSQLStartTruncatesQueryAndKeepsFullHash(t *testing.T) {
 	}
 	if entry["param_count"] != float64(2) {
 		t.Fatalf("param_count = %v", entry["param_count"])
+	}
+}
+
+func TestTruncateQueryKeepsValidUTF8(t *testing.T) {
+	query := strings.Repeat("é", 2000) // 4000 bytes
+	truncated := TruncateQuery(query)
+	if len(truncated) > MaxLoggedQueryBytes {
+		t.Fatalf("length = %d", len(truncated))
+	}
+	if !utf8.ValidString(truncated) {
+		t.Fatal("truncated query must stay valid UTF-8")
+	}
+	if !strings.HasSuffix(truncated, "...[TRUNCATED]") {
+		t.Fatal("missing truncation suffix")
 	}
 }
 

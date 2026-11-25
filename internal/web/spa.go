@@ -60,7 +60,7 @@ func (s *Server) mountSPA(r chi.Router) {
 func (s *Server) serveSPAIndex(w http.ResponseWriter, req *http.Request, spaFS fs.FS) {
 	index, err := fs.ReadFile(spaFS, "index.html")
 	if err != nil {
-		s.logger.Error("spa.index.missing", "error", err)
+		s.logger.ErrorContext(req.Context(), "spa.index.missing", "error", err)
 		http.Error(w, "SPA bundle is not built. Run `npm run build` in web/.", http.StatusServiceUnavailable)
 		return
 	}

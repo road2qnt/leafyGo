@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Eye, Filter, History, RefreshCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 
 import { jobApi } from "../../api/endpoints";
@@ -21,7 +21,6 @@ import {
   TableEmpty,
   TableWrap,
 } from "../../components/ui";
-import { applyHideRollback } from "../../lib/history";
 import {
   formatDateTime,
   formatDuration,
@@ -35,6 +34,11 @@ export default function HistoryPage() {
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Execution | null>(null);
 
+  useEffect(() => {
+    setSelected(null);
+    setFilter("");
+  }, [dbId]);
+
   const historyQuery = useQuery({
     queryKey: ["database", dbId, "history", hideRollback],
     queryFn: () => jobApi.history(dbId, hideRollback),
@@ -42,7 +46,7 @@ export default function HistoryPage() {
   });
 
   const raw = historyQuery.data?.executions ?? [];
-  const executions = useMemo(() => applyHideRollback(raw, hideRollback), [raw, hideRollback]);
+  const executions = raw;
   const filtered = useMemo(
     () =>
       executions.filter(
@@ -164,8 +168,8 @@ export default function HistoryPage() {
 
       <p className="text-[11px] text-muted">
         <History className="mr-1 inline h-3 w-3" />
-        The server applies <code className="font-mono">?hide_rollback=true</code>; the SPA mirrors the
-        rule immediately for a snappier checkbox.
+        The server applies <code className="font-mono">?hide_rollback=true</code>; the SPA refetches
+        with the filter rather than filtering a second time.
       </p>
 
       <Modal

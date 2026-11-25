@@ -12,6 +12,7 @@ import (
 	"leafygo/internal/domain"
 	"leafygo/internal/store"
 	"leafygo/internal/target"
+	"leafygo/internal/telemetry"
 )
 
 type HistoryStore interface {
@@ -209,6 +210,9 @@ func (s *Service) ExecuteDraft(ctx context.Context, in ExecuteInput) (domain.Mig
 				errText = strings.ReplaceAll(errText, "tidak pasti", "gagal")
 			}
 		}
+		// Never persist PostgreSQL row-detail values (Key (...) / Failing row) in
+		// history or expose them to log aggregation.
+		errText = telemetry.Sanitize(errText)
 	}
 
 	// 14. Finish migration

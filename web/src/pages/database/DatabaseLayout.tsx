@@ -48,6 +48,7 @@ export default function DatabaseLayout() {
   const overview = overviewQuery.data;
   const database = overview.database;
   const activeJob = overview.active_job;
+  const lockState = overview.lock_state;
 
   return (
     <DatabaseContext.Provider value={{ overview, refetch: () => void overviewQuery.refetch() }}>
@@ -66,7 +67,7 @@ export default function DatabaseLayout() {
             <span className="inline-flex flex-wrap items-center gap-2">
               {database.name}
               <LevelBadge level={overview.level} />
-              {database.lock_state ? <StatusBadge status={database.lock_state} kind="lock" /> : null}
+              {lockState ? <StatusBadge status={lockState} kind="lock" /> : null}
             </span>
           }
           description={
@@ -93,7 +94,7 @@ export default function DatabaseLayout() {
           }
         />
 
-        {database.lock_state === "uncertain_hold" ? (
+        {lockState === "uncertain_hold" ? (
           <Callout tone="plum" title="Uncertain commit — database locked">
             The previous session could not be proven dead. Automatic re-probe runs every 15s. Only an
             approved <code className="font-mono text-xs">resolve_uncertain</code> proposal can override
@@ -104,7 +105,7 @@ export default function DatabaseLayout() {
               </Link>
             ) : null}
           </Callout>
-        ) : database.lock_state === "partial_hold" ? (
+        ) : lockState === "partial_hold" ? (
           <Callout tone="warning" title="Partial migration holds the database lock">
             Committed batches remain, later batches did not. Queue another migration would be unsafe
             until this is retried or reverted.{" "}
@@ -114,7 +115,7 @@ export default function DatabaseLayout() {
               </Link>
             ) : null}
           </Callout>
-        ) : database.lock_state === "partially_reverted_hold" ? (
+        ) : lockState === "partially_reverted_hold" ? (
           <Callout tone="warning" title="Partial revert holds the database lock">
             Reverse compensation stopped part-way. Resume the revert downward; never run SQL up.
             {activeJob ? (
@@ -126,7 +127,7 @@ export default function DatabaseLayout() {
               </>
             ) : null}
           </Callout>
-        ) : database.lock_state === "running" ? (
+        ) : lockState === "running" ? (
           <Callout tone="info" title="A migration is running on this database">
             One database runs one migration at a time; other databases continue in parallel.
           </Callout>

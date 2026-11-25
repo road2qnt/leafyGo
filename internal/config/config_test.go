@@ -96,7 +96,7 @@ func TestLoadTelemetryOverrides(t *testing.T) {
 }
 
 func TestLoadTelemetryRejectsInvalidRatio(t *testing.T) {
-	for _, value := range []string{"1.5", "-0.1", "abc"} {
+	for _, value := range []string{"1.5", "-0.1", "abc", "NaN", "+Inf"} {
 		baseEnv(t)
 		withEnv(t, "OTEL_TRACES_SAMPLE_RATIO", value)
 		if _, err := Load(); err == nil {

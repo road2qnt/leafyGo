@@ -66,12 +66,11 @@ make web-build        # hasil ke internal/web/dist, ikut ter-embed ke Go
 
 | Env | Default | Fungsi |
 | --- | --- | --- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | mis. `otel-collector:4318`; kosong = hanya console |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | mis. `http://otel-collector:4318`; kosong = hanya console |
 | `OTEL_TRACES_CONSOLE` | true di non-production | cetak span JSON ke stdout |
 | `OTEL_TRACES_SAMPLE_RATIO` | `1` | rasio sampling 0–1 |
 | `METRICS_ENABLED` | `true` | endpoint `/metrics` |
 | `SPA_ROOT` | `false` | `true` = `/` redirect ke `/app/` |
-
 Jalankan stack observability (setelah `docker compose up -d`):
 
 ```bash

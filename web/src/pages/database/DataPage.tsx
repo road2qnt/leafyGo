@@ -39,11 +39,17 @@ export default function DataPage() {
     }
   }, [table, tables]);
 
+  useEffect(() => {
+    setTable("");
+    setPage(1);
+    setSearch("");
+    setSearchInput("");
+  }, [dbId]);
+
   const dataQuery = useQuery({
     queryKey: ["database", dbId, "data", table, page, pageSize, search],
     queryFn: () => databaseApi.data(dbId, { table, page, page_size: pageSize, q: search || undefined }),
     enabled: Boolean(dbId && table),
-    placeholderData: (previous) => previous,
   });
 
   const data = dataQuery.data;

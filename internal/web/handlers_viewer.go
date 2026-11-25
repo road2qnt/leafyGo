@@ -37,7 +37,7 @@ func (s *Server) targetPool(r *http.Request) (*pgxpool.Pool, error) {
 }
 
 func (s *Server) logTargetError(r *http.Request, err error) {
-	s.logger.Warn("target query failed", "db_id", currentDB(r).ID.String(), "error", target.ErrorText(err))
+	s.logger.WarnContext(r.Context(), "target query failed", "db_id", currentDB(r).ID.String(), "error", target.ErrorText(err))
 }
 
 func toTableInfo(t introspect.Table) tableInfo {

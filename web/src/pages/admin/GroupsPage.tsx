@@ -234,6 +234,7 @@ export default function GroupsPage() {
                   variant="ghost"
                   size="sm"
                   className="text-[#8b3323] hover:bg-[#fbebe6]"
+                  aria-label={`Delete group ${group.name}`}
                   onClick={() => { setDeleteTarget(group); setDeleteError(null); }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -462,6 +463,7 @@ export default function GroupsPage() {
               <Button
                 variant="secondary"
                 size="sm"
+                type="button"
                 className="mt-2"
                 onClick={() => void deactivateFromEditor()}
                 disabled={saving}

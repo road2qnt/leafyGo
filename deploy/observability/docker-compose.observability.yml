@@ -21,10 +21,10 @@ services:
       - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro,z
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "8889:8889"   # collector Prometheus exporter
-      - "13133:13133" # health_check
+      - "127.0.0.1:4317:4317"   # OTLP gRPC
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
+      - "127.0.0.1:8889:8889"   # collector Prometheus exporter
+      - "127.0.0.1:13133:13133" # health_check
     networks: [leafygo]
     restart: unless-stopped
     healthcheck:
@@ -62,7 +62,7 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     networks: [leafygo]
     restart: unless-stopped
 
@@ -79,7 +79,7 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro,z
       - grafana-data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     networks: [leafygo]
     depends_on:
       - prometheus

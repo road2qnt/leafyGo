@@ -38,6 +38,7 @@ import {
 import { useToast } from "../../hooks/useToast";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { percent } from "../../lib/format";
+import { dryRunMeta } from "../../lib/dryRun";
 import { useDatabaseContext } from "./context";
 
 function DecisionBadge({ row }: { row: ApprovalRow }) {
@@ -148,6 +149,13 @@ export default function ProposalReviewPage() {
   const summary = proposal.approval_summary;
   const reviewOpen = proposal.status === "pending_review";
   const activeJobId = proposal.job_id;
+  const dryRun = dryRunMeta(proposal.dry_run_status);
+  const dryRunBadge = {
+    success: "badge-success",
+    warning: "badge-warning",
+    danger: "badge-danger",
+    neutral: "badge-neutral",
+  }[dryRun.tone];
 
   return (
     <div className="space-y-5">
@@ -192,6 +200,11 @@ export default function ProposalReviewPage() {
           The pre-review dry-run hit <code className="font-mono text-xs">statement_timeout</code> (
           57014) or <code className="font-mono text-xs">lock_not_available</code> (55P03). That is not
           a rejection; approvers may continue, but should read the SQL carefully.
+        </Callout>
+      ) : proposal.dry_run_status === "failed" ? (
+        <Callout tone="danger" title="Dry-run failed — approval blocked">
+          The saved revision failed validation. Fix the SQL and run the dry-run again before asking
+          leaders to approve. The API must not queue a failed revision.
         </Callout>
       ) : null}
 
@@ -299,11 +312,7 @@ export default function ProposalReviewPage() {
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
               <StatusBadge status={proposal.status} kind="proposal" />
-              {proposal.dry_run_status === "inconclusive" ? (
-                <span className="badge badge-warning">dry-run inconclusive</span>
-              ) : (
-                <span className="badge badge-success">dry-run passed</span>
-              )}
+              <span className={`badge ${dryRunBadge}`}>{dryRun.label}</span>
             </div>
           </Card>
 
@@ -328,10 +337,20 @@ export default function ProposalReviewPage() {
                     />
                   </Field>
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <Button variant="danger" onClick={() => void decide("reject")} loading={deciding === "reject"}>
+                    <Button
+                      variant="danger"
+                      onClick={() => void decide("reject")}
+                      loading={deciding === "reject"}
+                      disabled={!dryRun.canReview}
+                    >
                       <ThumbsDown className="h-4 w-4" /> Reject
                     </Button>
-                    <Button onClick={() => void decide("approve")} loading={deciding === "approve"}>
+                    <Button
+                      onClick={() => void decide("approve")}
+                      loading={deciding === "approve"}
+                      disabled={!dryRun.canReview}
+                      title={dryRun.canReview ? undefined : "Dry-run failed; approval is blocked"}
+                    >
                       <ThumbsUp className="h-4 w-4" /> Approve
                     </Button>
                   </div>

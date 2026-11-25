@@ -10,9 +10,8 @@ import {
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-
 import { migrationApi } from "../../api/endpoints";
 import type { MigrationDefinition } from "../../api/types";
 import {
@@ -32,6 +31,7 @@ import {
   Textarea,
 } from "../../components/ui";
 import { useToast } from "../../hooks/useToast";
+import { dryRunMeta } from "../../lib/dryRun";
 import { formatDateTime } from "../../lib/format";
 import { useDatabaseContext } from "./context";
 
@@ -56,6 +56,12 @@ export default function MigrationsPage() {
   const [submitComment, setSubmitComment] = useState("");
   const [submitError, setSubmitError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setFilter("");
+    setSubmitTarget(null);
+    setSubmitError(null);
+  }, [dbId]);
 
   const canEdit = overview.level === "edit";
   const migrations = migrationsQuery.data?.migrations ?? [];
@@ -249,7 +255,6 @@ export default function MigrationsPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => navigate(`/databases/${dbId}/migrations/${migration.id}/edit`)}
-                          disabled={migration.is_superseded && !migration.is_immutable ? false : false}
                         >
                           <Pencil className="h-3.5 w-3.5" /> {locked ? "View" : "Edit"}
                         </Button>
@@ -328,13 +333,16 @@ export default function MigrationsPage() {
                     ) : null}
                   </td>
                   <td className="td">
-                    {proposal.dry_run_status === "inconclusive" ? (
-                      <span className="badge badge-warning">inconclusive</span>
-                    ) : proposal.dry_run_status === "failed" ? (
-                      <span className="badge badge-danger">failed</span>
-                    ) : (
-                      <span className="badge badge-success">passed</span>
-                    )}
+                    {(() => {
+                      const dryRun = dryRunMeta(proposal.dry_run_status);
+                      const toneClass = {
+                        success: "badge-success",
+                        warning: "badge-warning",
+                        danger: "badge-danger",
+                        neutral: "badge-neutral",
+                      }[dryRun.tone];
+                      return <span className={`badge ${toneClass}`}>{dryRun.label}</span>;
+                    })()}
                   </td>
                   <td className="td text-xs">{proposal.proposed_by_username}</td>
                   <td className="td text-xs text-muted">{formatDateTime(proposal.updated_at)}</td>

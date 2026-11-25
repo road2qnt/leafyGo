@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -204,7 +205,7 @@ func ratioEnv(key string, fallback float64) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a number between 0 and 1: %w", key, err)
 	}
-	if v < 0 || v > 1 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
 		return 0, fmt.Errorf("%s must be between 0 and 1", key)
 	}
 	return v, nil

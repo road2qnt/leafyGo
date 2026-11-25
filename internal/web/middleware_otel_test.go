@@ -109,6 +109,36 @@ func TestTelemetryMiddlewareCreatesSpanAndCorrelatesLog(t *testing.T) {
 	}
 }
 
+func TestTelemetryMiddlewareCorrelatesErrorLogs(t *testing.T) {
+	installTestTracer(t)
+	var buf bytes.Buffer
+	logger := telemetry.NewLogger(telemetry.LoggerOptions{Writer: &buf})
+	handler := telemetryMiddleware(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.ErrorContext(r.Context(), "handler.failed", "status", "error")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/databases/db-1/query", nil))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want request + error logs, got %d", len(lines))
+	}
+	var errorEntry map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &errorEntry); err != nil {
+		t.Fatal(err)
+	}
+	if errorEntry["event"] != "handler.failed" {
+		t.Fatalf("event = %v", errorEntry["event"])
+	}
+	if errorEntry["trace_id"] == "" || errorEntry["trace_id"] == nil {
+		t.Fatalf("error log missing trace_id: %v", errorEntry)
+	}
+	if errorEntry["correlation_id"] == "" || errorEntry["correlation_id"] == nil {
+		t.Fatalf("error log missing correlation_id: %v", errorEntry)
+	}
+}
+
 func TestTelemetryMiddlewareExtractsIncomingTraceparent(t *testing.T) {
 	recorder := installTestTracer(t)
 	var buf bytes.Buffer

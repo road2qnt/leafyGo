@@ -2,8 +2,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// The SPA is embedded under /app/ by the Go server. Build with
-// `npm run build -- --base=/` once SPA_ROOT=true retires the M1 template UI.
+// The SPA is embedded under /app/ by the Go server. SPA_ROOT=true only
+// redirects / to /app/; the base stays /app/.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: "/app/",

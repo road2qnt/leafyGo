@@ -3,6 +3,8 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -133,6 +135,44 @@ func TestNewTracerProviderConsoleExporterAndResource(t *testing.T) {
 	}
 	if v, ok := lookupAttr(attrs, "deployment.environment"); !ok || v.AsString() != "development" {
 		t.Fatalf("deployment.environment = %v", v)
+	}
+}
+
+func TestConsoleExporterDefaultsToStdout(t *testing.T) {
+	old := os.Stdout
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writeEnd
+	t.Cleanup(func() {
+		os.Stdout = old
+		_ = readEnd.Close()
+		_ = writeEnd.Close()
+	})
+
+	tp, err := NewTracerProvider(context.Background(), TracerOptions{
+		ServiceName: "leafygo-test",
+		Console:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, span := tp.Tracer().Start(context.Background(), "stdout.default.span")
+	span.End()
+	if err := tp.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = old
+	out, err := io.ReadAll(readEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "stdout.default.span") {
+		t.Fatalf("default console exporter wrote nothing to stdout: %q", out)
 	}
 }
 

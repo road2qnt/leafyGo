@@ -28,7 +28,7 @@ import {
   StatusBadge,
 } from "../components/ui";
 import { formatNumber, formatRelative } from "../lib/format";
-import { isActiveJob, lockLabel } from "../lib/status";
+import { lockLabel } from "../lib/status";
 
 const isMock = isMockMode();
 
@@ -212,7 +212,6 @@ export default function DashboardPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {databases.map((database) => {
-              const active = isActiveJob(undefined);
               return (
                 <div key={database.id} className="card card-hover flex flex-col p-5">
                   <div className="flex items-start justify-between gap-2">
@@ -268,7 +267,6 @@ export default function DashboardPage() {
                       Open <ArrowRight className="h-3 w-3" />
                     </Link>
                   </div>
-                  {active ? null : null}
                 </div>
               );
             })}

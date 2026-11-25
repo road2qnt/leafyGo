@@ -174,8 +174,10 @@ The SPA polls the job every 1.5s while `queued|running|partial|partially_reverte
 return cached/consistent cumulative numbers so the bar never regresses.
 
 `Execution` includes `executed_sql` when available. The history page opens the
-immutable SQL snapshot in a modal. The SPA mirrors the `hide_rollback` rule
-client-side (`web/src/lib/history.ts`) and also relies on the server filter.
+immutable SQL snapshot in a modal. `hide_rollback` is server-authoritative: the
+SPA refetches with the flag instead of filtering a second time. The shared
+root-grouping helper (`web/src/lib/history.ts`) still backs the mock and is
+unit-tested, so the server and demo implement the same rule.
 
 ## Mandatory error codes used by the UI
 

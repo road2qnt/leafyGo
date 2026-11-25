@@ -14,7 +14,6 @@ import {
   ActionBadge,
   Button,
   Card,
-  PageLoader,
   ProgressBar,
   SectionHeader,
   StatCard,
@@ -32,10 +31,7 @@ export default function OverviewPage() {
   const activeJob = overview.active_job;
   const database = overview.database;
 
-  if (!overview) return <PageLoader />;
-
   const jobProgress = activeJob ? percent(activeJob.completed_batches, activeJob.total_batches) : 0;
-
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -49,8 +45,8 @@ export default function OverviewPage() {
         <StatCard label="On-disk size" value={formatBytes(overview.stats.total_size_bytes)} icon={HardDrive} />
         <StatCard
           label="Access level"
-          value={database.level === "edit" ? "View + Edit" : "View only"}
-          hint={database.level === "edit" ? "Can submit migrations and run console." : "Read-only tools."}
+          value={overview.level === "edit" ? "View + Edit" : "View only"}
+          hint={overview.level === "edit" ? "Can submit migrations and run console." : "Read-only tools."}
           icon={DatabaseIcon}
         />
       </div>
@@ -118,7 +114,7 @@ export default function OverviewPage() {
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-muted">Lock state</dt>
-              <dd>{database.lock_state ? <StatusBadge status={database.lock_state} kind="lock" /> : <span className="badge badge-success">Free</span>}</dd>
+              <dd>{overview.lock_state ? <StatusBadge status={overview.lock_state} kind="lock" /> : <span className="badge badge-success">Free</span>}</dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-muted">Host</dt>

@@ -36,7 +36,7 @@ executable checklist and records the integration handshake with P1/P2.
 | Go unit/integration suite | `go test ./...` | pass |
 | Go static analysis | `go vet ./...` | pass |
 | Telemetry redaction/propagation tests | `go test ./internal/telemetry/` | pass |
-| SPA unit tests | `cd web && npm test` | 9/9 pass |
+| SPA unit tests | `cd web && npm test` | 17/17 pass |
 | SPA typecheck + build | `cd web && npm run build` | pass |
 | Root compose | `docker compose config` | pass |
 | Observability compose | `docker compose -f deploy/observability/... config` | pass |
@@ -47,6 +47,30 @@ The browser walkthrough covered: login, dashboard, overview, migrations, proposa
 review, running job monitor, history + Hide rollback (6 → 3 rows), admin users/
 groups/connections, approval to `queued`, `PREDECESSOR_NOT_READY` rejection, and
 mobile dashboard/proposal/job pages.
+
+## Post-review fixes
+
+- Sanitizer now redacts `password_hash`/`password_enc`, `E'...'` and
+  dollar-quoted literals, `Key (...) = (...)` and `Failing row contains (...)`
+  PostgreSQL details; migration history error text is sanitized before storage.
+- Hold banners and access labels now read `overview.lock_state` /
+  `overview.level`; the mock deliberately omits those decorations from the
+  nested database object so the walkthrough catches regressions.
+- `partially_reverted` jobs only offer reverse resume; forward retry is hidden.
+  A successful normal rollback exposes a **Propose forward** action.
+- Dry-run rendering has four states (passed / inconclusive / failed / not
+  validated) and blocks approval on failed.
+- Group deactivate is `type="button"`, console exporter defaults to stdout,
+  SQL default logger is wired, request/error logs use context-aware calls,
+  cross-database result/selection state resets, and OTLP docs use `http://`.
+- Local observability ports bind to `127.0.0.1`; `SPA_ROOT` is passed through
+  compose.
+
+Deferred minors: modal focus trap/return focus, `SqlEditor` accessible name on
+the inner editor, filelog scope restricted to LeafyGo containers, and a
+multi-replica API `jobs_current` aggregation strategy (documented single-replica
+assumption).
+
 
 ## Telemetry integration points for P1/P2
 

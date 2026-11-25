@@ -383,13 +383,13 @@ func (s *Server) requireDBAction(action access.Action) func(http.Handler) http.H
 				return
 			}
 			if err != nil {
-				s.logger.Error("load database", "error", err)
+				s.logger.ErrorContext(r.Context(), "load database", "error", err)
 				s.renderError(w, r, http.StatusInternalServerError, "Could not load the database.")
 				return
 			}
 			level, err := s.policy.Level(r.Context(), *user, id)
 			if err != nil {
-				s.logger.Error("check access", "error", err)
+				s.logger.ErrorContext(r.Context(), "check access", "error", err)
 				s.renderError(w, r, http.StatusInternalServerError, "Could not check access rights.")
 				return
 			}
@@ -466,21 +466,6 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 	})
 }
 
-func (s *Server) logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
-		// Jangan log cookie/token/password.
-		s.logger.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
-	})
-}
-
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -489,6 +474,11 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// Unwrap preserves ResponseController/Flusher/Hijacker support.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page string, data pageData) {
@@ -532,7 +522,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 	}
 	tmpl, err := template.New("layout").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partials/*.html", "templates/pages/"+page)
 	if err != nil {
-		s.logger.Error("parse template", "page", page, "error", err)
+		s.logger.ErrorContext(r.Context(), "parse template", "page", page, "error", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
@@ -540,7 +530,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
-		s.logger.Error("execute template", "page", page, "error", err)
+		s.logger.ErrorContext(r.Context(), "execute template", "page", page, "error", err)
 	}
 }
 

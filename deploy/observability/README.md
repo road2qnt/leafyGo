@@ -28,7 +28,7 @@ automatically in the `LeafyGo` folder.
 `.env` or shell:
 
 ```ini
-OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_TRACES_CONSOLE=false
 OTEL_TRACES_SAMPLE_RATIO=1
 METRICS_ENABLED=true
@@ -68,6 +68,10 @@ log files. Do not copy that setting to production.
 ## Notes
 
 - `jobs_current` must stay server-only; the worker binary must not register the
-  `JobCounts` source (otherwise replicas double-count).
+  `JobCounts` source (otherwise replicas double-count). Run a single API replica
+  for this demo, or aggregate the gauge explicitly in PromQL.
 - The OTLP HTTP exporter is used (`otlptracehttp`) to keep the demo firewall
-  friendly; gRPC is still accepted by the collector.
+  friendly; gRPC is still accepted by the collector. The endpoint must include
+  `http://` for the local plaintext collector.
+- Host ports are bound to `127.0.0.1`; the app/worker reach the stack over the
+  Docker network. Anonymous Grafana admin is local-demo only.
