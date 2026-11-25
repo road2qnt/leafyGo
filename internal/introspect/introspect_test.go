@@ -262,3 +262,30 @@ func TestReadPageIsReadOnly(t *testing.T) {
 		t.Fatalf("rows after hostile name = %d, %v; want 5", n, err)
 	}
 }
+
+func TestListTablesAndDescribeHideLeafygoInternalTables(t *testing.T) {
+	pool := targetPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		create table `+schema+`._leafygo_executions (execution_id uuid primary key);
+		create table `+schema+`._leafygo_batch_checkpoints (root_execution_id uuid, batch_no int, primary key (root_execution_id, batch_no));
+	`); err != nil {
+		t.Fatalf("create internal tables: %v", err)
+	}
+
+	tables, err := introspect.ListTables(ctx, pool)
+	if err != nil {
+		t.Fatalf("ListTables: %v", err)
+	}
+	for _, tb := range tables {
+		if strings.HasPrefix(tb.Name, "_leafygo_") {
+			t.Fatalf("internal table leaked in ListTables: %s.%s", tb.Schema, tb.Name)
+		}
+	}
+
+	for _, name := range []string{"_leafygo_executions", "_leafygo_batch_checkpoints"} {
+		if _, err := introspect.Describe(ctx, pool, schema, name); !errors.Is(err, introspect.ErrNotFound) {
+			t.Fatalf("Describe(%s) = %v; want ErrNotFound", name, err)
+		}
+	}
+}

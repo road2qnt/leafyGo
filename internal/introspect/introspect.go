@@ -79,6 +79,7 @@ const relationFilter = `
 	and n.nspname not in ('pg_catalog','information_schema')
 	and n.nspname not like 'pg_toast%'
 	and n.nspname not like 'pg_temp%'
+	and c.relname not like '\_leafygo\_%' escape '\'
 	and has_schema_privilege(n.oid, 'USAGE')`
 
 const relationColumns = `
@@ -259,6 +260,10 @@ func ReadPage(ctx context.Context, pool *pgxpool.Pool, d TableDetail, page, page
 		return Page{}, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '3s'"); err != nil {
+		return Page{}, err
+	}
 
 	rows, err := tx.Query(ctx, query, pageSize+1, (page-1)*pageSize)
 	if err != nil {
