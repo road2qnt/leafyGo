@@ -450,6 +450,58 @@ func TestClaimTakesOverHoldAndRestoreLockPutsItBack(t *testing.T) {
 	}
 }
 
+func TestRequeueOfTakeoverKeepsDatabaseHeld(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+	db := createDB(t, st, "orders")
+	mig := newMigration(t, st, db.ID, domain.ModeBatch)
+	apply := newExecution(t, st, db.ID, mig, domain.ActionApply, domain.ModeBatch, nil, nil)
+	applyJob := enqueue(t, st, apply)
+
+	c := claim(t, st, "w1")
+	if err := st.HoldLock(ctx, c.Lease, domain.LockPartialHold); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `update migration_jobs set status = 'partial' where job_id = $1`, applyJob.ID); err != nil {
+		t.Fatalf("job partial: %v", err)
+	}
+	if _, err := st.Pool().Exec(ctx, `update migration_proposals set status = 'partial' where id = $1`, apply.proposalID); err != nil {
+		t.Fatalf("proposal partial: %v", err)
+	}
+
+	retry := newExecution(t, st, db.ID, mig, domain.ActionBatchRetry, domain.ModeBatch, &apply.executionID, &apply.executionID)
+	retryJob := enqueue(t, st, retry)
+	_, other := newApplyJob(t, st, db.ID)
+	taken := claim(t, st, "w2")
+	if taken == nil || taken.Job.ID != retryJob.ID {
+		t.Fatalf("takeover claim = %+v; want batch_retry", taken)
+	}
+
+	failed, err := st.RequeueJob(ctx, taken.Lease, 0, "target unreachable")
+	if err != nil || failed {
+		t.Fatalf("requeue = %v, %v", failed, err)
+	}
+	lock, err := st.GetDBLock(ctx, db.ID)
+	if err != nil {
+		t.Fatalf("get lock: %v", err)
+	}
+	if lock.LockState != domain.LockPartialHold || lock.JobID != applyJob.ID || lock.ExecutionID != apply.executionID {
+		t.Fatalf("lock after requeue = %+v; the partial hold must survive", lock)
+	}
+	job, err := st.GetJob(ctx, retryJob.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.Status != domain.JobQueued || job.RetryCount != 1 {
+		t.Fatalf("requeued job = %+v", job)
+	}
+
+	again := claim(t, st, "w3")
+	if again == nil || again.Job.ID != retryJob.ID || again.PreviousLockState != domain.LockPartialHold {
+		t.Fatalf("second claim = %+v; want the batch_retry to take over the hold again, not job %s", again, other.ID)
+	}
+}
+
 func TestRestoreLockDeletesFreshLock(t *testing.T) {
 	st := testPool(t)
 	ctx := context.Background()
