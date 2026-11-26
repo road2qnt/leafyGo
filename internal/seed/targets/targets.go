@@ -36,6 +36,7 @@ func All(seed uint64, primary, analytics Host) []Target {
 		{Conn: "Billing", DBName: "billing", Host: primary, build: buildBilling(billing, &methods), restricted: restrictBilling(billing, &methods)},
 		{Conn: "People", DBName: "people", Host: primary, build: buildPeople(gofakeit.New(seed + 4))},
 		{Conn: "Analytics", DBName: "analytics", Host: analytics, build: buildAnalytics(gofakeit.New(seed + 5))},
+		{Conn: "Bench", DBName: BenchDBName, Host: primary, build: buildBench},
 	}
 }
 

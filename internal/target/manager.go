@@ -376,6 +376,40 @@ func (m *Manager) Snapshots() []PoolSnapshot {
 	return out
 }
 
+// OpenDedicatedConn opens a short-lived, non-pooled pgx.Conn to the target database
+// with the specified application_name (e.g. "leafygo-dryrun-<proposal_id>" or "leafygo-exec-<execution_id>").
+func (m *Manager) OpenDedicatedConn(ctx context.Context, db domain.DBConnection, appName string) (*pgx.Conn, error) {
+	password, err := m.box.Decrypt(db.PasswordEnc)
+	if err != nil {
+		return nil, classifyRunError(phaseConnect, fmt.Errorf("decrypt credentials: %w", err))
+	}
+
+	dsn, err := buildDSN(db, password)
+	if err != nil {
+		return nil, classifyRunError(phaseConnect, fmt.Errorf("build dsn: %w", err))
+	}
+
+	connCfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, classifyRunError(phaseConnect, fmt.Errorf("parse config: %w", err))
+	}
+	connCfg.ConnectTimeout = m.opts.ConnectTimeout
+	if connCfg.RuntimeParams == nil {
+		connCfg.RuntimeParams = make(map[string]string)
+	}
+	if appName != "" {
+		connCfg.RuntimeParams["application_name"] = appName
+	} else {
+		connCfg.RuntimeParams["application_name"] = m.opts.ApplicationName
+	}
+
+	conn, err := pgx.ConnectConfig(ctx, connCfg)
+	if err != nil {
+		return nil, classifyRunError(phaseConnect, err)
+	}
+	return conn, nil
+}
+
 func (m *Manager) Invalidate(dbID uuid.UUID) {
 	m.mu.Lock()
 	entry, ok := m.pools[dbID]

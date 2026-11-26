@@ -91,6 +91,12 @@ Buka <http://localhost:8080>, login dengan admin dari env
 
 Compose otomatis menjalankan service one-shot `seed` (`cmd/seed`) sebelum `app`.
 
+Untuk mengubah jumlah worker migrasi:
+
+```bash
+docker compose up -d --scale worker=3 worker
+```
+
 Untuk rebuild app tanpa menjalankan seed (database harus sudah siap):
 
 ```bash
@@ -119,6 +125,7 @@ Untuk mengisi data seed, jalankan database dengan `docker compose up -d db targe
 go test ./...                                   # unit (integration auto-skip)
 cd web && npm test                              # Vitest (status + hide_rollback)
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/leafygo_test?sslmode=disable' \
+TEST_TARGET_DATABASE_URL='postgres://postgres:postgres@localhost:5432/leafygo_target_test?sslmode=disable' \
   go test -p 1 ./...                            # unit + integration
 ```
 
@@ -139,14 +146,21 @@ Semua parameter terdapat di `.env.example`. Yang paling relevan:
 | `QUERY_MAX_CELL_BYTES`     | 4096                           | Batas ukuran string per sel (4 KiB)         |
 | `QUERY_MAX_RESULT_BYTES`   | 2097152                        | Batas akumulasi ukuran hasil (2 MiB)        |
 | `QUERY_MAX_CONCURRENT`     | 4                              | Batas query console konkuren global         |
+| `WORKER_MAX_CONCURRENT_JOBS` | 4                            | Job paralel per proses worker               |
 
-## Dokumentasi
+## Dokumentasi & Keamanan (Milestone 2 CodeQL SAST)
 
 Parameter session, rotasi, pencabutan akses, CSRF, akses efektif, dan matriks aksi terdapat di
 [docs/keamanan-dan-akses.md](docs/keamanan-dan-akses.md).
 
+Hasil lengkap audit Static Application Security Testing (SAST) menggunakan **GitHub CodeQL** (`security-extended` & `security-and-quality` untuk `go` dan `javascript-typescript`), pemetaan CWE / OWASP Top 10, mitigasi kontrol berlapis (`RejectTxControl`, `pgx.Identifier.Sanitize()`, `BEGIN ... ROLLBACK` dry-run, Multi-Group Leader Approval, dan database immutability triggers), serta bukti re-scan didokumentasikan di:
+- Workflow CI: [.github/workflows/codeql.yml](.github/workflows/codeql.yml)
+- Laporan Audit SAST: [tests/security/CODEQL_REPORT.md](tests/security/CODEQL_REPORT.md)
+
 Isi data seed, daftar user, dan
 ketentuan reset ada di [docs/seed.md](docs/seed.md).
+
+Worker migrasi, pemulihan lock, dan dataset uji besar dijelaskan di [docs/worker.md](docs/worker.md).
 
 ## Pembagian kerja
 

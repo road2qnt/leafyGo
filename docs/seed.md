@@ -9,6 +9,7 @@ Database yang di-seed sebagai berikut:
 | Billing    | `targets-db` (5434)   | invoices, payments, refunds, payment_methods, `card_vault` (tidak bisa di-SELECT oleh user app)          |
 | People     | `targets-db` (5434)   | departments, positions, employees, salaries, leave_requests                                              |
 | Analytics  | `analytics-db` (5436) | schema `analytics` (daily_sales, product_metrics, materialized view) dan `public` (etl_runs, dashboards) |
+| Bench      | `targets-db` (5434)   | `large_migration_bench` (1.000.000 baris) untuk uji migration besar                                      |
 | Legacy ERP | `legacy-erp.internal` | host sengaja tidak ada, untuk menunjukkan koneksi gagal                                                  |
 
 Daftar admin dan user:

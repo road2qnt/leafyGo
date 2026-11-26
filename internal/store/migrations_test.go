@@ -1,10 +1,13 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
+	"leafygo/internal/domain"
 )
 
 func TestAdvisoryLockKeyUsesFirstEightBytesBigEndian(t *testing.T) {
@@ -39,5 +42,71 @@ func TestDurationMillisecondsClamp(t *testing.T) {
 		if got := durationMilliseconds(tc.in); got != tc.want {
 			t.Fatalf("durationMilliseconds(%v) = %d; want %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestValidateMigrationDefinitionFields(t *testing.T) {
+	selfID := uuid.New()
+	cases := []struct {
+		name    string
+		def     domain.MigrationDefinition
+		wantErr error
+	}{
+		{
+			name:    "missing title",
+			def:     domain.MigrationDefinition{SQLUp: "SELECT 1;", SQLDown: "SELECT 1;"},
+			wantErr: ErrInvalidMigrationDef,
+		},
+		{
+			name:    "missing sql_up",
+			def:     domain.MigrationDefinition{Title: "t", SQLDown: "SELECT 1;"},
+			wantErr: ErrInvalidMigrationDef,
+		},
+		{
+			name:    "reversible without sql_down",
+			def:     domain.MigrationDefinition{Title: "t", SQLUp: "SELECT 1;", IsIrreversible: false},
+			wantErr: ErrInvalidMigrationDef,
+		},
+		{
+			name:    "irreversible without reason",
+			def:     domain.MigrationDefinition{Title: "t", SQLUp: "SELECT 1;", IsIrreversible: true},
+			wantErr: ErrInvalidMigrationDef,
+		},
+		{
+			name:    "invalid execution mode",
+			def:     domain.MigrationDefinition{Title: "t", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;", ExecutionMode: "unknown"},
+			wantErr: ErrInvalidMigrationDef,
+		},
+		{
+			name:    "self replaces_migration_id",
+			def:     domain.MigrationDefinition{ID: selfID, Title: "t", SQLUp: "SELECT 1;", SQLDown: "SELECT 1;", ReplacesMigrationID: &selfID},
+			wantErr: ErrMigrationNotSupersedable,
+		},
+		{
+			name:    "valid reversible normal default mode",
+			def:     domain.MigrationDefinition{Title: "t", SQLUp: "CREATE TABLE t(id int);", SQLDown: "DROP TABLE t;"},
+			wantErr: nil,
+		},
+		{
+			name:    "valid irreversible batch mode",
+			def:     domain.MigrationDefinition{Title: "t", SQLUp: "DELETE FROM t;", IsIrreversible: true, IrreversibleReason: "lossy delete", ExecutionMode: domain.ExecutionModeBatch},
+			wantErr: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := tc.def
+			err := validateMigrationDefinitionFields(&d)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if d.ExecutionMode == "" {
+					t.Fatal("expected ExecutionMode default to be populated")
+				}
+			} else if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v; want %v", err, tc.wantErr)
+			}
+		})
 	}
 }

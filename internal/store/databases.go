@@ -23,6 +23,7 @@ type dbConnectionRow struct {
 	PasswordEnc []byte
 	SSLMode     string
 	CreatedBy   pgtype.UUID
+	DeletedAt   pgtype.Timestamptz
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -43,6 +44,10 @@ func (r dbConnectionRow) toDomain() domain.DBConnection {
 	if r.CreatedBy.Valid {
 		id := uuid.UUID(r.CreatedBy.Bytes)
 		c.CreatedBy = &id
+	}
+	if r.DeletedAt.Valid {
+		t := r.DeletedAt.Time
+		c.DeletedAt = &t
 	}
 	return c
 }
@@ -71,12 +76,12 @@ func (s *Store) UpdateDBConnection(ctx context.Context, c domain.DBConnection) (
 		update db_connections
 		set name=$2, host=$3, port=$4, dbname=$5, username=$6, password_enc=$7, sslmode=$8,
 		    updated_at=clock_timestamp()
-		where id=$1
+		where id=$1 and deleted_at is null
 		returning id, name, host, port, dbname, username, password_enc, sslmode,
-		          created_by, created_at, updated_at`,
+		          created_by, deleted_at, created_at, updated_at`,
 		c.ID, c.Name, c.Host, c.Port, c.DBName, c.Username, c.PasswordEnc, c.SSLMode).
 		Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode,
-			&r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
+			&r.CreatedBy, &r.DeletedAt, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.DBConnection{}, ErrNotFound
 	}
@@ -97,12 +102,25 @@ func (s *Store) DeleteDBConnection(ctx context.Context, id uuid.UUID) error {
 	// FOR KEY SHARE on this row, so either delete waits and then sees running,
 	// or delete wins and the insert fails its foreign key.
 	var locked uuid.UUID
-	err = tx.QueryRow(ctx, `select id from db_connections where id=$1 for update`, id).Scan(&locked)
+	err = tx.QueryRow(ctx, `select id from db_connections where id=$1 and deleted_at is null for update`, id).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("lock db connection: %w", err)
+	}
+
+	var activeWork bool
+	if err := tx.QueryRow(ctx, `
+		select exists (
+			select 1 from database_migration_locks where db_id = $1
+			union all
+			select 1 from migration_jobs where db_id = $1 and status in ('queued', 'running', 'partial', 'partially_reverted', 'uncertain')
+		)`, id).Scan(&activeWork); err != nil {
+		return fmt.Errorf("check active migration work: %w", err)
+	}
+	if activeWork {
+		return ErrDBHasActiveWork
 	}
 
 	var running bool
@@ -115,8 +133,24 @@ func (s *Store) DeleteDBConnection(ctx context.Context, id uuid.UUID) error {
 		return ErrRunningMigration
 	}
 
-	if _, err := tx.Exec(ctx, `delete from db_connections where id=$1`, id); err != nil {
-		return fmt.Errorf("delete db connection: %w", err)
+	var hasHistory bool
+	if err := tx.QueryRow(ctx, `
+		select exists (
+			select 1 from migration_definitions where db_id = $1
+			union all
+			select 1 from migration_executions where db_id = $1
+		)`, id).Scan(&hasHistory); err != nil {
+		return fmt.Errorf("check db history: %w", err)
+	}
+
+	if hasHistory {
+		if _, err := tx.Exec(ctx, `update db_connections set deleted_at = now(), updated_at = now() where id = $1`, id); err != nil {
+			return fmt.Errorf("soft delete db connection: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx, `delete from db_connections where id=$1`, id); err != nil {
+			return fmt.Errorf("delete db connection: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("delete db commit: %w", err)
@@ -127,9 +161,9 @@ func (s *Store) DeleteDBConnection(ctx context.Context, id uuid.UUID) error {
 func (s *Store) GetDBConnection(ctx context.Context, id uuid.UUID) (domain.DBConnection, error) {
 	var r dbConnectionRow
 	err := s.pool.QueryRow(ctx, `
-		select id, name, host, port, dbname, username, password_enc, sslmode, created_by, created_at, updated_at
-		from db_connections where id=$1`, id).
-		Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
+		select id, name, host, port, dbname, username, password_enc, sslmode, created_by, deleted_at, created_at, updated_at
+		from db_connections where id=$1 and deleted_at is null`, id).
+		Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode, &r.CreatedBy, &r.DeletedAt, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.DBConnection{}, ErrNotFound
 	}
@@ -141,8 +175,10 @@ func (s *Store) GetDBConnection(ctx context.Context, id uuid.UUID) (domain.DBCon
 
 func (s *Store) ListDBConnections(ctx context.Context) ([]domain.DBConnection, error) {
 	rows, err := s.pool.Query(ctx, `
-		select id, name, host, port, dbname, username, password_enc, sslmode, created_by, created_at, updated_at
-		from db_connections order by lower(name)`)
+		select id, name, host, port, dbname, username, password_enc, sslmode, created_by, deleted_at, created_at, updated_at
+		from db_connections
+		where deleted_at is null
+		order by lower(name)`)
 	if err != nil {
 		return nil, fmt.Errorf("list db connections: %w", err)
 	}
@@ -151,7 +187,7 @@ func (s *Store) ListDBConnections(ctx context.Context) ([]domain.DBConnection, e
 	var out []domain.DBConnection
 	for rows.Next() {
 		var r dbConnectionRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode, &r.CreatedBy, &r.DeletedAt, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan db connection: %w", err)
 		}
 		out = append(out, r.toDomain())
@@ -162,12 +198,13 @@ func (s *Store) ListDBConnections(ctx context.Context) ([]domain.DBConnection, e
 func (s *Store) ListAccessibleDBs(ctx context.Context, userID uuid.UUID) ([]domain.AccessibleDB, error) {
 	rows, err := s.pool.Query(ctx, `
 		select c.id, c.name, c.host, c.port, c.dbname, c.username, c.password_enc, c.sslmode,
-		       c.created_by, c.created_at, c.updated_at,
+		       c.created_by, c.deleted_at, c.created_at, c.updated_at,
 		       max(case a.level when 'edit' then 2 else 1 end) as level
 		from db_connections c
 		join db_access a on a.db_id=c.id
+		join groups g on g.id=a.group_id
 		join group_members m on m.group_id=a.group_id
-		where m.user_id=$1
+		where m.user_id=$1 and c.deleted_at is null and g.deleted_at is null
 		group by c.id
 		order by lower(c.name)`, userID)
 	if err != nil {
@@ -180,7 +217,7 @@ func (s *Store) ListAccessibleDBs(ctx context.Context, userID uuid.UUID) ([]doma
 		var r dbConnectionRow
 		var level int
 		if err := rows.Scan(&r.ID, &r.Name, &r.Host, &r.Port, &r.DBName, &r.Username, &r.PasswordEnc, &r.SSLMode,
-			&r.CreatedBy, &r.CreatedAt, &r.UpdatedAt, &level); err != nil {
+			&r.CreatedBy, &r.DeletedAt, &r.CreatedAt, &r.UpdatedAt, &level); err != nil {
 			return nil, fmt.Errorf("scan accessible db: %w", err)
 		}
 		out = append(out, domain.AccessibleDB{DBConnection: r.toDomain(), Level: domain.AccessLevel(level)})
@@ -194,8 +231,10 @@ func (s *Store) EffectiveLevel(ctx context.Context, userID, dbID uuid.UUID) (dom
 	err := s.pool.QueryRow(ctx, `
 		select coalesce(max(case a.level when 'edit' then 2 else 1 end), 0)
 		from db_access a
+		join db_connections c on c.id=a.db_id
+		join groups g on g.id=a.group_id
 		join group_members m on m.group_id=a.group_id
-		where m.user_id=$1 and a.db_id=$2`, userID, dbID).Scan(&level)
+		where m.user_id=$1 and a.db_id=$2 and c.deleted_at is null and g.deleted_at is null`, userID, dbID).Scan(&level)
 	if err != nil {
 		return domain.LevelNone, fmt.Errorf("effective level: %w", err)
 	}

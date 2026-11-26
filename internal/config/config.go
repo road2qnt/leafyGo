@@ -49,6 +49,21 @@ type Config struct {
 	OTELSampleRatio float64
 	MetricsEnabled  bool
 	SPARoot         bool
+
+	Worker WorkerConfig
+}
+
+type WorkerConfig struct {
+	ID                string
+	MaxConcurrentJobs int
+	PollInterval      time.Duration
+	LeaseTTL          time.Duration
+	HeartbeatInterval time.Duration
+	RecoveryInterval  time.Duration
+	ReprobeInterval   time.Duration
+	ProbeTimeout      time.Duration
+	ExecTimeout       time.Duration
+	ShutdownTimeout   time.Duration
 }
 
 func Load() (Config, error) {
@@ -95,19 +110,15 @@ func Load() (Config, error) {
 	if cfg.MaxMigrationBytes, err = positiveInt64Env("MAX_MIGRATION_BYTES", 1048576); err != nil {
 		return Config{}, err
 	}
-	viewerPageSize, err := positiveInt64Env("VIEWER_PAGE_SIZE", 50)
-	if err != nil {
+	if cfg.ViewerPageSize, err = positiveIntEnv("VIEWER_PAGE_SIZE", 50); err != nil {
 		return Config{}, err
 	}
-	viewerMaxPageSize, err := positiveInt64Env("VIEWER_MAX_PAGE_SIZE", 100)
-	if err != nil {
+	if cfg.ViewerMaxPageSize, err = positiveIntEnv("VIEWER_MAX_PAGE_SIZE", 100); err != nil {
 		return Config{}, err
 	}
-	if viewerMaxPageSize < viewerPageSize {
+	if cfg.ViewerMaxPageSize < cfg.ViewerPageSize {
 		return Config{}, errors.New("VIEWER_MAX_PAGE_SIZE must be greater than or equal to VIEWER_PAGE_SIZE")
 	}
-	cfg.ViewerPageSize = int(viewerPageSize)
-	cfg.ViewerMaxPageSize = int(viewerMaxPageSize)
 
 	if cfg.QueryTimeout, err = durationEnv("QUERY_TIMEOUT", 15*time.Second); err != nil {
 		return Config{}, err
@@ -115,22 +126,18 @@ func Load() (Config, error) {
 	if cfg.MaxQueryBytes, err = positiveInt64Env("MAX_QUERY_BYTES", 65536); err != nil {
 		return Config{}, err
 	}
-	queryMaxRows, err := positiveInt64Env("QUERY_MAX_ROWS", 1000)
-	if err != nil {
+	if cfg.QueryMaxRows, err = positiveIntEnv("QUERY_MAX_ROWS", 1000); err != nil {
 		return Config{}, err
 	}
-	cfg.QueryMaxRows = int(queryMaxRows)
 	if cfg.QueryMaxCellBytes, err = positiveInt64Env("QUERY_MAX_CELL_BYTES", 4096); err != nil {
 		return Config{}, err
 	}
 	if cfg.QueryMaxResultBytes, err = positiveInt64Env("QUERY_MAX_RESULT_BYTES", 2097152); err != nil {
 		return Config{}, err
 	}
-	queryMaxConcurrent, err := positiveInt64Env("QUERY_MAX_CONCURRENT", 4)
-	if err != nil {
+	if cfg.QueryMaxConcurrent, err = positiveIntEnv("QUERY_MAX_CONCURRENT", 4); err != nil {
 		return Config{}, err
 	}
-	cfg.QueryMaxConcurrent = int(queryMaxConcurrent)
 
 	if cfg.UIPreview, err = boolEnv("UI_PREVIEW", false); err != nil {
 		return Config{}, err
@@ -152,6 +159,9 @@ func Load() (Config, error) {
 	if cfg.SPARoot, err = boolEnv("SPA_ROOT", false); err != nil {
 		return Config{}, err
 	}
+	if cfg.Worker, err = loadWorkerConfig(); err != nil {
+		return Config{}, err
+	}
 
 	key, err := decodeKey(os.Getenv("ENCRYPTION_KEY"))
 	if err != nil {
@@ -160,6 +170,37 @@ func Load() (Config, error) {
 	cfg.EncryptionKey = key
 
 	return cfg, nil
+}
+
+func loadWorkerConfig() (WorkerConfig, error) {
+	w := WorkerConfig{ID: os.Getenv("WORKER_ID")}
+	var err error
+	if w.MaxConcurrentJobs, err = positiveIntEnv("WORKER_MAX_CONCURRENT_JOBS", 4); err != nil {
+		return WorkerConfig{}, err
+	}
+	durations := []struct {
+		dst      *time.Duration
+		key      string
+		fallback time.Duration
+	}{
+		{&w.PollInterval, "WORKER_POLL_INTERVAL", 2 * time.Second},
+		{&w.LeaseTTL, "WORKER_LEASE_TTL", 15 * time.Second},
+		{&w.HeartbeatInterval, "WORKER_HEARTBEAT_INTERVAL", 5 * time.Second},
+		{&w.RecoveryInterval, "WORKER_RECOVERY_INTERVAL", 5 * time.Second},
+		{&w.ReprobeInterval, "WORKER_REPROBE_INTERVAL", 15 * time.Second},
+		{&w.ProbeTimeout, "WORKER_PROBE_TIMEOUT", 10 * time.Second},
+		{&w.ExecTimeout, "WORKER_EXEC_TIMEOUT", 30 * time.Minute},
+		{&w.ShutdownTimeout, "WORKER_SHUTDOWN_TIMEOUT", 30 * time.Second},
+	}
+	for _, d := range durations {
+		if *d.dst, err = durationEnv(d.key, d.fallback); err != nil {
+			return WorkerConfig{}, err
+		}
+	}
+	if w.HeartbeatInterval >= w.LeaseTTL {
+		return WorkerConfig{}, errors.New("WORKER_HEARTBEAT_INTERVAL must be shorter than WORKER_LEASE_TTL")
+	}
+	return w, nil
 }
 
 func env(key, fallback string) string {
@@ -217,6 +258,21 @@ func positiveInt64Env(key string, fallback int64) (int64, error) {
 		return fallback, nil
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	if v <= 0 {
+		return 0, fmt.Errorf("%s must be positive", key)
+	}
+	return v, nil
+}
+
+func positiveIntEnv(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}

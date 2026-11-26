@@ -169,6 +169,71 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/login", s.handleLoginGet)
 	r.Post("/login", s.handleLoginPost)
 
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Post("/auth/login", s.handleAPIAuthLogin)
+
+		r.Group(func(r chi.Router) {
+			r.Use(s.apiAuthenticate)
+			r.Use(s.apiCSRFProtect)
+
+			r.Post("/auth/logout", s.handleAPIAuthLogout)
+			r.Get("/auth/me", s.handleAPIAuthMe)
+
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(s.apiRequirePlatformAdmin)
+
+				r.Get("/users", s.handleAPIAdminUsersList)
+				r.Post("/users", s.handleAPIAdminUserCreate)
+				r.Post("/users/{userID}/active", s.handleAPIAdminUserActive)
+				r.Post("/users/{userID}/password", s.handleAPIAdminUserPassword)
+				r.Delete("/users/{userID}", s.handleAPIAdminUserDelete)
+
+				r.Get("/groups", s.handleAPIAdminGroupsList)
+				r.Post("/groups", s.handleAPIAdminGroupCreate)
+				r.Get("/groups/{groupID}", s.handleAPIAdminGroupGet)
+				r.Put("/groups/{groupID}", s.handleAPIAdminGroupUpdate)
+				r.Put("/groups/{groupID}/leader", s.handleAPIAdminGroupLeader)
+				r.Post("/groups/{groupID}/members", s.handleAPIAdminGroupAddMember)
+				r.Delete("/groups/{groupID}/members/{userID}", s.handleAPIAdminGroupRemoveMember)
+				r.Post("/groups/{groupID}/access", s.handleAPIAdminGroupAccess)
+				r.Delete("/groups/{groupID}", s.handleAPIAdminGroupDelete)
+
+				r.Get("/databases", s.handleAPIAdminDatabasesList)
+				r.Post("/databases", s.handleAPIAdminDatabaseCreate)
+				r.Get("/databases/{dbID}", s.handleAPIAdminDatabaseGet)
+				r.Put("/databases/{dbID}", s.handleAPIAdminDatabaseUpdate)
+				r.Post("/databases/{dbID}/test", s.handleAPIAdminDatabaseTest)
+				r.Delete("/databases/{dbID}", s.handleAPIAdminDatabaseDelete)
+			})
+
+			r.Get("/databases", s.handleAPIDatabasesList)
+
+			r.Route("/databases/{id}", func(r chi.Router) {
+				r.With(s.apiRequireDBAction(access.ActionViewOverview)).Get("/overview", s.handleAPIDatabaseOverview)
+				r.With(s.apiRequireDBAction(access.ActionViewSchema)).Get("/schema", s.handleAPIDatabaseSchema)
+				r.With(s.apiRequireDBAction(access.ActionViewData)).Get("/data", s.handleAPIDatabaseData)
+				r.With(s.apiRequireDBAction(access.ActionQueryConsole)).Post("/query", s.handleAPIDatabaseQuery)
+
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleAPIMigrationsList)
+				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/migrations", s.handleAPIMigrationCreate)
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/migrations/{mid}", s.handleAPIMigrationGet)
+				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Put("/migrations/{mid}", s.handleAPIMigrationUpdate)
+
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/proposals", s.handleAPIProposalsList)
+				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/proposals", s.handleAPIProposalSubmit)
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/proposals/{pid}", s.handleAPIProposalGet)
+				r.With(s.apiRequireDBAction(access.ActionWithdrawProposal)).Post("/proposals/{pid}/withdraw", s.handleAPIProposalWithdraw)
+				r.With(s.apiRequireDBAction(access.ActionApproveProposal)).Post("/proposals/{pid}/approve", s.handleAPIProposalApprove)
+				r.With(s.apiRequireDBAction(access.ActionApproveProposal)).Post("/proposals/{pid}/reject", s.handleAPIProposalReject)
+
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/history", s.handleAPIHistoryList)
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/history/{execID}", s.handleAPIHistoryDetail)
+
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/jobs/{jobID}", s.handleAPIJobGet)
+			})
+		})
+	})
+
 	r.Group(func(r chi.Router) {
 		r.Use(s.authenticate)
 		r.Use(s.csrfProtect)
@@ -230,9 +295,17 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Endpoint not found.")
+			return
+		}
 		s.renderError(w, r, http.StatusNotFound, "Page not found.")
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeAPIError(w, r, http.StatusMethodNotAllowed, ErrCodeValidation, "Request method not allowed.")
+			return
+		}
 		s.renderError(w, r, http.StatusMethodNotAllowed, "Request method not allowed.")
 	})
 

@@ -46,7 +46,12 @@ func TestMigrateCreatesMigrationTables(t *testing.T) {
 	pool, _ := testDB(t)
 	ctx := context.Background()
 
-	for _, name := range []string{"migration_history", "migration_drafts"} {
+	for _, name := range []string{
+		"migration_history", "migration_drafts",
+		"migration_definitions", "migration_proposals", "migration_proposal_approvers",
+		"migration_approvals", "migration_executions", "migration_jobs",
+		"database_migration_locks", "worker_heartbeats",
+	} {
 		if !tableExists(t, pool, name) {
 			t.Fatalf("table %s does not exist", name)
 		}

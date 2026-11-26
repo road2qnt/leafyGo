@@ -1,7 +1,10 @@
-.PHONY: run seed test test-integration test-all vet web-install web-dev web-build web-test obs-up obs-down obs-config
+.PHONY: run worker seed test test-integration test-all vet web-install web-dev web-build web-test obs-up obs-down obs-config
 
 run:
 	go run ./cmd/server
+
+worker:
+	go run ./cmd/worker
 
 seed:
 	go run ./cmd/seed
