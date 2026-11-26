@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"time"
 
 	"leafygo/internal/domain"
 	"leafygo/internal/store"
@@ -200,6 +201,7 @@ func (r *run) beforeBatch(ctx context.Context, hb *heartbeat) bool {
 		return false
 	}
 	if r.w.stopping.Load() {
+		r.flushProgress()
 		if err := r.w.st.HandoffLease(r.ctx, r.lease); err != nil && !errors.Is(err, store.ErrLeaseLost) {
 			r.log.Error("hand off lease", "error", err)
 		}
@@ -215,14 +217,31 @@ func (r *run) beforeBatch(ctx context.Context, hb *heartbeat) bool {
 	return true
 }
 
+// Writes progress at most every progressInterval. Skipped writes are flushed before the outcome.
 func (r *run) recordProgress(ctx context.Context, p store.BatchProgress) bool {
+	if time.Since(r.progressAt) < progressInterval {
+		r.pending = &p
+		return true
+	}
+	return r.writeProgress(ctx, p)
+}
+
+func (r *run) writeProgress(ctx context.Context, p store.BatchProgress) bool {
 	if err := r.w.st.RecordBatchProgress(ctx, r.lease, p); err != nil {
 		if !errors.Is(err, store.ErrLeaseLost) {
 			r.log.Error("record batch progress", "error", err)
 		}
 		return false
 	}
+	r.progressAt = time.Now()
+	r.pending = nil
 	return true
+}
+
+func (r *run) flushProgress() {
+	if r.pending != nil {
+		r.writeProgress(r.ctx, *r.pending)
+	}
 }
 
 func (r *run) afterBatch(batchNo int) {

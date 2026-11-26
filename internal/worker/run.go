@@ -24,7 +24,12 @@ type run struct {
 	lease store.Lease
 	batch target.BatchConfig
 	conn  *pgx.Conn
+
+	progressAt time.Time
+	pending    *store.BatchProgress
 }
+
+const progressInterval = 250 * time.Millisecond
 
 func (r *run) open(password string) error {
 	conn, err := target.OpenExecConn(r.ctx, r.work.DB, password, r.work.Job.ExecutionID, r.w.connectTimeout)
@@ -115,6 +120,7 @@ func (r *run) abandoned(hb *heartbeat) bool {
 }
 
 func (r *run) finish(o store.Outcome) {
+	r.flushProgress()
 	log := r.log.With("status", o.Status)
 	if o.ErrText != "" {
 		log = log.With("error", o.ErrText)
@@ -135,6 +141,7 @@ func (r *run) finish(o store.Outcome) {
 }
 
 func (r *run) markUncertain(cause error) {
+	r.flushProgress()
 	text := (&JobError{Code: CodeUncertain, Message: "commit outcome unknown: " + target.ErrorText(cause)}).Error()
 	r.log.Warn("commit outcome unknown, holding the database until a re-probe settles it", "error", cause)
 	if err := r.w.st.MarkUncertain(r.ctx, r.lease, r.w.cfg.ReprobeInterval, text); err != nil {
