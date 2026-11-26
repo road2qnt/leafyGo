@@ -286,8 +286,8 @@ func TestClaimIsFIFOPerDatabaseAndParallelAcrossDatabases(t *testing.T) {
 		t.Fatalf("third claim = %+v; want nil", c)
 	}
 
-	if err := st.ReleaseLock(ctx, first.Lease); err != nil {
-		t.Fatalf("release: %v", err)
+	if err := st.FinishJob(ctx, first.Lease, store.Outcome{Status: domain.JobSuccess}); err != nil {
+		t.Fatalf("finish: %v", err)
 	}
 	next := claim(t, st, "w3")
 	if next == nil || next.Job.ExecutionID != a2.executionID {
@@ -405,14 +405,8 @@ func TestClaimTakesOverHoldAndRestoreLockPutsItBack(t *testing.T) {
 	applyJob := enqueue(t, st, apply)
 
 	c := claim(t, st, "w1")
-	if err := st.HoldLock(ctx, c.Lease, domain.LockPartialHold); err != nil {
-		t.Fatalf("hold: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `update migration_jobs set status = 'partial' where job_id = $1`, applyJob.ID); err != nil {
-		t.Fatalf("job partial: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `update migration_proposals set status = 'partial' where id = $1`, apply.proposalID); err != nil {
-		t.Fatalf("proposal partial: %v", err)
+	if err := st.FinishJob(ctx, c.Lease, store.Outcome{Status: domain.JobPartial, HoldState: domain.LockPartialHold}); err != nil {
+		t.Fatalf("finish partial: %v", err)
 	}
 
 	newApplyJob(t, st, db.ID)
@@ -437,8 +431,8 @@ func TestClaimTakesOverHoldAndRestoreLockPutsItBack(t *testing.T) {
 		t.Fatalf("lock after takeover = %+v", lock)
 	}
 
-	if err := st.RestoreLock(ctx, taken.Lease); err != nil {
-		t.Fatalf("restore: %v", err)
+	if err := st.FailBeforeExecute(ctx, taken.Lease, "revalidation failed"); err != nil {
+		t.Fatalf("fail before execute: %v", err)
 	}
 	lock, err = st.GetDBLock(ctx, db.ID)
 	if err != nil {
@@ -459,14 +453,8 @@ func TestRequeueOfTakeoverKeepsDatabaseHeld(t *testing.T) {
 	applyJob := enqueue(t, st, apply)
 
 	c := claim(t, st, "w1")
-	if err := st.HoldLock(ctx, c.Lease, domain.LockPartialHold); err != nil {
-		t.Fatalf("hold: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `update migration_jobs set status = 'partial' where job_id = $1`, applyJob.ID); err != nil {
-		t.Fatalf("job partial: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `update migration_proposals set status = 'partial' where id = $1`, apply.proposalID); err != nil {
-		t.Fatalf("proposal partial: %v", err)
+	if err := st.FinishJob(ctx, c.Lease, store.Outcome{Status: domain.JobPartial, HoldState: domain.LockPartialHold}); err != nil {
+		t.Fatalf("finish partial: %v", err)
 	}
 
 	retry := newExecution(t, st, db.ID, mig, domain.ActionBatchRetry, domain.ModeBatch, &apply.executionID, &apply.executionID)
@@ -502,15 +490,15 @@ func TestRequeueOfTakeoverKeepsDatabaseHeld(t *testing.T) {
 	}
 }
 
-func TestRestoreLockDeletesFreshLock(t *testing.T) {
+func TestFailBeforeExecuteDeletesFreshLock(t *testing.T) {
 	st := testPool(t)
 	ctx := context.Background()
 	db := createDB(t, st, "orders")
 	newApplyJob(t, st, db.ID)
 
 	c := claim(t, st, "w1")
-	if err := st.RestoreLock(ctx, c.Lease); err != nil {
-		t.Fatalf("restore: %v", err)
+	if err := st.FailBeforeExecute(ctx, c.Lease, "revalidation failed"); err != nil {
+		t.Fatalf("fail before execute: %v", err)
 	}
 	if _, err := st.GetDBLock(ctx, db.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("lock still present: %v", err)
@@ -592,19 +580,20 @@ func TestExpiredLeaseTakeoverFencesOldWorker(t *testing.T) {
 	if err := st.RenewLease(ctx, c.Lease, testLeaseTTL); !errors.Is(err, store.ErrLeaseLost) {
 		t.Fatalf("old renew err = %v; want ErrLeaseLost", err)
 	}
-	if err := st.UpdateJobProgress(ctx, c.Lease, &cursor, 1, 10); !errors.Is(err, store.ErrLeaseLost) {
+	progress := store.BatchProgress{LastCursor: &cursor, JobBatches: 1, JobRows: 10, TotalBatches: 10}
+	if err := st.RecordBatchProgress(ctx, c.Lease, progress); !errors.Is(err, store.ErrLeaseLost) {
 		t.Fatalf("old progress err = %v; want ErrLeaseLost", err)
 	}
-	if err := st.HoldLock(ctx, c.Lease, domain.LockPartialHold); !errors.Is(err, store.ErrLeaseLost) {
-		t.Fatalf("old hold err = %v; want ErrLeaseLost", err)
+	if err := st.FinishJob(ctx, c.Lease, store.Outcome{Status: domain.JobPartial, HoldState: domain.LockPartialHold}); !errors.Is(err, store.ErrLeaseLost) {
+		t.Fatalf("old finish err = %v; want ErrLeaseLost", err)
 	}
-	if err := st.ReleaseLock(ctx, c.Lease); !errors.Is(err, store.ErrLeaseLost) {
-		t.Fatalf("old release err = %v; want ErrLeaseLost", err)
+	if _, err := st.RequeueJob(ctx, c.Lease, 0, "old"); !errors.Is(err, store.ErrLeaseLost) {
+		t.Fatalf("old requeue err = %v; want ErrLeaseLost", err)
 	}
 
 	newLease := c.Lease
 	newLease.WorkerID, newLease.Epoch = l.WorkerID, l.LockEpoch
-	if err := st.UpdateJobProgress(ctx, newLease, &cursor, 1, 10); err != nil {
+	if err := st.RecordBatchProgress(ctx, newLease, progress); err != nil {
 		t.Fatalf("new progress: %v", err)
 	}
 	minC, maxC := int64(1), int64(100)
@@ -618,18 +607,8 @@ func TestExpiredLeaseTakeoverFencesOldWorker(t *testing.T) {
 	if *job.LastCursor != 10 || job.CompletedBatches != 1 || job.CommittedRows != 10 || *job.ScopeMaxCursor != 100 || job.TotalBatches != 10 {
 		t.Fatalf("progress = %+v", job)
 	}
-	if err := st.ReleaseLock(ctx, newLease); err != nil {
-		t.Fatalf("new release: %v", err)
-	}
-}
-
-func TestHoldLockRejectsNonHoldState(t *testing.T) {
-	st := testPool(t)
-	db := createDB(t, st, "orders")
-	newApplyJob(t, st, db.ID)
-	c := claim(t, st, "w1")
-	if err := st.HoldLock(context.Background(), c.Lease, domain.LockRunning); !errors.Is(err, store.ErrInvalidLockState) {
-		t.Fatalf("err = %v; want ErrInvalidLockState", err)
+	if err := st.FinishJob(ctx, newLease, store.Outcome{Status: domain.JobSuccess}); err != nil {
+		t.Fatalf("new finish: %v", err)
 	}
 }
 

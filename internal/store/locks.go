@@ -12,8 +12,6 @@ import (
 	"leafygo/internal/domain"
 )
 
-var ErrInvalidLockState = errors.New("invalid lock state")
-
 const lockColumns = `
 	db_id, job_id, execution_id, migration_id, worker_id, lock_state, previous_lock_state,
 	lock_epoch, lease_until, next_probe_at, acquired_at, updated_at`
@@ -60,76 +58,8 @@ func (s *Store) RenewLease(ctx context.Context, lease Lease, ttl time.Duration) 
 	return nil
 }
 
-// Deletes the lock and wakes idle workers so the next job on the database starts right away.
-func (s *Store) ReleaseLock(ctx context.Context, lease Lease) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("release lock begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	tag, err := tx.Exec(ctx, `
-		delete from database_migration_locks
-		where db_id = $1 and job_id = $2 and worker_id = $3 and lock_epoch = $4`,
-		lease.DBID, lease.JobID, lease.WorkerID, lease.Epoch)
-	if err != nil {
-		return fmt.Errorf("release lock: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrLeaseLost
-	}
-	if err := notifyJobs(ctx, tx, lease.DBID); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("release lock commit: %w", err)
-	}
-	return nil
-}
-
-// Keeps the database locked after a partial, partially reverted or uncertain outcome.
-// Held locks never expire through lease_until.
-func (s *Store) HoldLock(ctx context.Context, lease Lease, state string) error {
-	switch state {
-	case domain.LockPartialHold, domain.LockPartiallyRevertedHold, domain.LockUncertainHold:
-	default:
-		return fmt.Errorf("%w: %q", ErrInvalidLockState, state)
-	}
-	tag, err := s.pool.Exec(ctx, `
-		update database_migration_locks
-		set lock_state = $5, previous_lock_state = null, updated_at = now()
-		where db_id = $1 and job_id = $2 and worker_id = $3 and lock_epoch = $4`,
-		lease.DBID, lease.JobID, lease.WorkerID, lease.Epoch, state)
-	if err != nil {
-		return fmt.Errorf("hold lock: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrLeaseLost
-	}
-	return nil
-}
-
-// Undoes a claim whose revalidation failed: a fresh lock is deleted, a taken over hold goes back
-// to its previous state and owner. The epoch is left as is.
-func (s *Store) RestoreLock(ctx context.Context, lease Lease) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("restore lock begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := restoreLockTx(ctx, tx, lease); err != nil {
-		return err
-	}
-	if err := notifyJobs(ctx, tx, lease.DBID); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("restore lock commit: %w", err)
-	}
-	return nil
-}
-
+// Deletes a fresh lock, or returns a taken over hold to its previous state and owner without
+// changing the epoch.
 func restoreLockTx(ctx context.Context, tx pgx.Tx, lease Lease) error {
 	var previous *string
 	err := tx.QueryRow(ctx, `

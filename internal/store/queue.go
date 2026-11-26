@@ -413,24 +413,6 @@ func (s *Store) UpdateJobScope(ctx context.Context, lease Lease, scopeMin, scope
 	return nil
 }
 
-func (s *Store) UpdateJobProgress(ctx context.Context, lease Lease, lastCursor *int64, completedBatches int, committedRows int64) error {
-	tag, err := s.pool.Exec(ctx, `
-		update migration_jobs j
-		set last_cursor = $5, completed_batches = $6, committed_rows = $7, updated_at = now()
-		where j.job_id = $1
-		  and exists (
-		      select 1 from database_migration_locks l
-		      where l.db_id = $2 and l.job_id = j.job_id and l.worker_id = $3 and l.lock_epoch = $4)`,
-		lease.JobID, lease.DBID, lease.WorkerID, lease.Epoch, lastCursor, completedBatches, committedRows)
-	if err != nil {
-		return fmt.Errorf("update job progress: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrLeaseLost
-	}
-	return nil
-}
-
 func (s *Store) GetJob(ctx context.Context, jobID uuid.UUID) (domain.MigrationJob, error) {
 	return getJob(ctx, s.pool, jobID)
 }
