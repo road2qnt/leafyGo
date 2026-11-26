@@ -625,12 +625,7 @@ func (s *Store) checkPredecessorApprovalGateTx(ctx context.Context, tx pgx.Tx, d
 		return nil, fmt.Errorf("iterate definitions for predecessor gate: %w", err)
 	}
 
-	activeMap, err := s.loadActiveMigrationMapTx(ctx, tx, dbID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Load queued/running jobs on db_id
+	// Jobs first, so a job finishing between the two reads is still seen.
 	jrows, err := tx.Query(ctx, `
 		select j.migration_id, d.effective_seq, j.action_type
 		from migration_jobs j
@@ -659,6 +654,11 @@ func (s *Store) checkPredecessorApprovalGateTx(ctx context.Context, tx pgx.Tx, d
 	jrows.Close()
 	if err := jrows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate active jobs for predecessor gate: %w", err)
+	}
+
+	activeMap, err := s.loadActiveMigrationMapTx(ctx, tx, dbID)
+	if err != nil {
+		return nil, err
 	}
 
 	activeBySeq := make(map[int64]uuid.UUID)
