@@ -30,11 +30,6 @@ const (
 )
 
 const (
-	LockStateRunning               = "running"
-	LockStatePartialHold           = "partial_hold"
-	LockStatePartiallyRevertedHold = "partially_reverted_hold"
-	LockStateUncertainHold         = "uncertain_hold"
-
 	LockRunning               = "running"
 	LockPartialHold           = "partial_hold"
 	LockPartiallyRevertedHold = "partially_reverted_hold"

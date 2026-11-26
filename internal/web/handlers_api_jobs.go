@@ -8,7 +8,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"leafygo/internal/access"
 	"leafygo/internal/domain"
 	"leafygo/internal/store"
 )
@@ -75,58 +74,32 @@ func newJobStatusResponse(j domain.MigrationJob, lock *domain.DBLock) jobStatusR
 
 // A job on another database answers 404 like a missing one, so job IDs cannot be probed across databases.
 func (s *Server) handleAPIJobGet(w http.ResponseWriter, r *http.Request) {
-	user := currentUser(r)
-	dbID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		s.writeAPIError(w, r, http.StatusNotFound, "DB_NOT_FOUND", "Database not found.")
-		return
-	}
-	if _, err := s.store.GetDBConnection(r.Context(), dbID); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.writeAPIError(w, r, http.StatusNotFound, "DB_NOT_FOUND", "Database not found.")
-			return
-		}
-		s.logger.Error("load database", "error", err)
-		s.writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL", "Could not load the database.")
-		return
-	}
-	level, err := s.policy.Level(r.Context(), *user, dbID)
-	if err != nil {
-		s.logger.Error("check access", "error", err)
-		s.writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL", "Could not check access rights.")
-		return
-	}
-	if !access.Can(level, access.ActionViewHistory) {
-		s.auditDenied(r, string(access.ActionViewHistory), dbID.String())
-		s.writeAPIError(w, r, http.StatusForbidden, "FORBIDDEN", "You do not have access to this database.")
-		return
-	}
-
+	db := currentDB(r)
 	jobID, err := uuid.Parse(chi.URLParam(r, "jobID"))
 	if err != nil {
-		s.writeAPIError(w, r, http.StatusNotFound, "JOB_NOT_FOUND", "Job not found.")
+		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Job not found.")
 		return
 	}
 	job, err := s.store.GetJob(r.Context(), jobID)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && job.DBID != dbID) {
-		s.writeAPIError(w, r, http.StatusNotFound, "JOB_NOT_FOUND", "Job not found.")
+	if errors.Is(err, store.ErrNotFound) || (err == nil && job.DBID != db.ID) {
+		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Job not found.")
 		return
 	}
 	if err != nil {
 		s.logger.Error("load job", "error", err)
-		s.writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL", "Could not load the job.")
+		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Could not load the job.")
 		return
 	}
 
 	var lock *domain.DBLock
-	l, err := s.store.GetDBLock(r.Context(), dbID)
+	l, err := s.store.GetDBLock(r.Context(), db.ID)
 	switch {
 	case err == nil:
 		lock = &l
 	case !errors.Is(err, store.ErrNotFound):
 		s.logger.Error("load db lock", "error", err)
-		s.writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL", "Could not load the database lock.")
+		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Could not load the database lock.")
 		return
 	}
-	s.writeJSON(w, http.StatusOK, newJobStatusResponse(job, lock))
+	writeJSON(w, http.StatusOK, newJobStatusResponse(job, lock))
 }

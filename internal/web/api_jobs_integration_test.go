@@ -72,7 +72,7 @@ func grantAccess(t *testing.T, st *store.Store, groupName string, user domain.Us
 func decodeAPIErrorCode(t *testing.T, body []byte) string {
 	t.Helper()
 	var payload struct {
-		Error apiError `json:"error"`
+		Error apiErrorDetail `json:"error"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode error body %q: %v", body, err)
@@ -125,12 +125,12 @@ func TestAPIJobStatus(t *testing.T) {
 		status          int
 		code            string
 	}{
-		{"job under another database", "/api/v1/databases/" + billing.ID.String() + "/jobs/" + job.ID.String(), viewerSID, http.StatusNotFound, "JOB_NOT_FOUND"},
-		{"unknown job", "/api/v1/databases/" + orders.ID.String() + "/jobs/" + uuid.NewString(), viewerSID, http.StatusNotFound, "JOB_NOT_FOUND"},
-		{"malformed job id", "/api/v1/databases/" + orders.ID.String() + "/jobs/nope", viewerSID, http.StatusNotFound, "JOB_NOT_FOUND"},
-		{"unknown database", "/api/v1/databases/" + uuid.NewString() + "/jobs/" + job.ID.String(), viewerSID, http.StatusNotFound, "DB_NOT_FOUND"},
-		{"user without access", path, outsiderSID, http.StatusForbidden, "FORBIDDEN"},
-		{"platform admin", path, adminSID, http.StatusForbidden, "FORBIDDEN"},
+		{"job under another database", "/api/v1/databases/" + billing.ID.String() + "/jobs/" + job.ID.String(), viewerSID, http.StatusNotFound, ErrCodeNotFound},
+		{"unknown job", "/api/v1/databases/" + orders.ID.String() + "/jobs/" + uuid.NewString(), viewerSID, http.StatusNotFound, ErrCodeNotFound},
+		{"malformed job id", "/api/v1/databases/" + orders.ID.String() + "/jobs/nope", viewerSID, http.StatusNotFound, ErrCodeNotFound},
+		{"unknown database", "/api/v1/databases/" + uuid.NewString() + "/jobs/" + job.ID.String(), viewerSID, http.StatusNotFound, ErrCodeNotFound},
+		{"user without access", path, outsiderSID, http.StatusForbidden, ErrCodeForbidden},
+		{"platform admin", path, adminSID, http.StatusForbidden, ErrCodeForbidden},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

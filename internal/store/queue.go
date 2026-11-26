@@ -299,8 +299,8 @@ func (s *Store) claimCandidate(ctx context.Context, c claimCandidate, workerID s
 	return claimed, nil
 }
 
-// Releases the lock and puts the job back in the queue with a backoff, or fails it for good
-// once it has used up its retries. It reports whether the job failed.
+// Requeues the job with a backoff, or fails it once retries run out. A taken over hold is restored,
+// not released. Reports whether the job failed.
 func (s *Store) RequeueJob(ctx context.Context, lease Lease, backoff time.Duration, errText string) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -308,15 +308,8 @@ func (s *Store) RequeueJob(ctx context.Context, lease Lease, backoff time.Durati
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	tag, err := tx.Exec(ctx, `
-		delete from database_migration_locks
-		where db_id = $1 and job_id = $2 and worker_id = $3 and lock_epoch = $4`,
-		lease.DBID, lease.JobID, lease.WorkerID, lease.Epoch)
-	if err != nil {
-		return false, fmt.Errorf("requeue release lock: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return false, ErrLeaseLost
+	if err := restoreLockTx(ctx, tx, lease); err != nil {
+		return false, err
 	}
 
 	var retryCount, maxRetries int
@@ -413,24 +406,6 @@ func (s *Store) UpdateJobScope(ctx context.Context, lease Lease, scopeMin, scope
 		lease.JobID, lease.DBID, lease.WorkerID, lease.Epoch, scopeMin, scopeMax, totalBatches)
 	if err != nil {
 		return fmt.Errorf("update job scope: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrLeaseLost
-	}
-	return nil
-}
-
-func (s *Store) UpdateJobProgress(ctx context.Context, lease Lease, lastCursor *int64, completedBatches int, committedRows int64) error {
-	tag, err := s.pool.Exec(ctx, `
-		update migration_jobs j
-		set last_cursor = $5, completed_batches = $6, committed_rows = $7, updated_at = now()
-		where j.job_id = $1
-		  and exists (
-		      select 1 from database_migration_locks l
-		      where l.db_id = $2 and l.job_id = j.job_id and l.worker_id = $3 and l.lock_epoch = $4)`,
-		lease.JobID, lease.DBID, lease.WorkerID, lease.Epoch, lastCursor, completedBatches, committedRows)
-	if err != nil {
-		return fmt.Errorf("update job progress: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrLeaseLost

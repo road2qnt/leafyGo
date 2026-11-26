@@ -56,11 +56,11 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
           upload: true
-          output: "../results-${{ matrix.language }}"
+          output: "${{ runner.temp }}/codeql-results-${{ matrix.language }}"
 
       - name: Upload SARIF Artifact
         uses: actions/upload-artifact@v4
         with:
           name: codeql-sarif-${{ matrix.language }}
-          path: "../results-${{ matrix.language }}"
+          path: "${{ runner.temp }}/codeql-results-${{ matrix.language }}"
 
