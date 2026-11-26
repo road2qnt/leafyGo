@@ -7,3 +7,6 @@
 # SPA dependencies
 web/node_modules/
 web/.vite/
+
+/tests/k6/fixtures.json
+/tests/k6/results/
