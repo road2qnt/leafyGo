@@ -29,35 +29,58 @@ func (w *Worker) recoveryLoop(ctx, jobCtx context.Context) {
 	}
 }
 
-// Takes over every running lock whose lease expired, then re-probes every uncertain hold that is due.
+// Recovers expired leases, then due uncertain holds. Each needs a free job slot.
 func (w *Worker) recoverOnce(ctx, jobCtx context.Context) {
-	for ctx.Err() == nil && !w.stopping.Load() {
+	for w.acquireSlot(ctx) {
 		l, err := w.st.TakeoverExpiredLock(ctx, w.cfg.ID, w.cfg.LeaseTTL)
-		if err != nil {
-			w.log.Error("take over expired lock", "error", err)
-			break
-		}
-		if l == nil {
+		if err != nil || l == nil {
+			w.releaseSlot()
+			if err != nil {
+				w.log.Error("take over expired lock", "error", err)
+			}
 			break
 		}
 		w.recoverLock(jobCtx, *l, false)
 	}
-	for ctx.Err() == nil && !w.stopping.Load() {
+	for w.acquireSlot(ctx) {
 		l, err := w.st.ClaimDueReprobe(ctx, w.cfg.ID, w.cfg.ReprobeInterval)
-		if err != nil {
-			w.log.Error("claim uncertain re-probe", "error", err)
-			break
-		}
-		if l == nil {
+		if err != nil || l == nil {
+			w.releaseSlot()
+			if err != nil {
+				w.log.Error("claim uncertain re-probe", "error", err)
+			}
 			break
 		}
 		w.recoverLock(jobCtx, *l, true)
 	}
 }
 
-// Settles a job whose worker vanished. The old target session must be proven gone before the
-// evidence tables are trusted, otherwise the database stays in uncertain_hold.
+func (w *Worker) acquireSlot(ctx context.Context) bool {
+	if ctx.Err() != nil || w.stopping.Load() {
+		return false
+	}
+	select {
+	case w.sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (w *Worker) releaseSlot() {
+	<-w.sem
+	w.signal()
+}
+
+// Settles a job whose worker vanished, holding the database as uncertain until the old session is
+// proven gone. Releases the caller's slot unless a resumed run takes it.
 func (w *Worker) recoverLock(ctx context.Context, l domain.DBLock, reprobe bool) {
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			w.releaseSlot()
+		}
+	}()
 	lease := store.LeaseFromLock(l)
 	log := w.log.With("job_id", l.JobID, "execution_id", l.ExecutionID, "db_id", l.DBID, "lock_epoch", l.LockEpoch, "reprobe", reprobe)
 	log.Info("recovering job")
@@ -99,7 +122,7 @@ func (w *Worker) recoverLock(ctx context.Context, l domain.DBLock, reprobe bool)
 		return
 	}
 	target.CloseConn(probeConn)
-	w.resumeBatches(ctx, log, lease, work, reprobe, password)
+	handedOff = w.resumeBatches(ctx, log, lease, work, reprobe, password)
 }
 
 func (w *Worker) holdUncertain(ctx context.Context, log *slog.Logger, lease store.Lease, alreadyHeld bool, cause error) {
@@ -172,41 +195,33 @@ func (w *Worker) settleNormal(ctx context.Context, log *slog.Logger, lease store
 	}
 }
 
-// Continues a batch execution in place from its checkpoints, in the same direction it was going.
-// Revalidation is skipped on purpose: the batches already committed were approved.
-func (w *Worker) resumeBatches(ctx context.Context, log *slog.Logger, lease store.Lease, work store.JobWork, reprobe bool, password string) {
+// Resumes batches from checkpoints in the original direction, without revalidation.
+// Reports whether the run started and took the job slot.
+func (w *Worker) resumeBatches(ctx context.Context, log *slog.Logger, lease store.Lease, work store.JobWork, reprobe bool, password string) bool {
 	if reprobe {
 		if err := w.st.ResumeFromHold(ctx, lease, w.cfg.LeaseTTL); err != nil {
 			log.Error("resume from uncertain hold", "error", err)
-			return
+			return false
 		}
 	}
 	cfg, err := parseBatchConfig(work.Migration.BatchConfig)
 	if err != nil {
 		log.Error("parse batch config for recovery", "error", err)
-		return
+		return false
 	}
 	r := &run{w: w, ctx: ctx, log: log, work: work, lease: lease, batch: cfg}
 	if err := r.open(password); err != nil {
 		w.holdUncertain(ctx, log, lease, false, err)
-		return
+		return false
 	}
 
-	select {
-	case w.sem <- struct{}{}:
-	case <-ctx.Done():
-		r.close()
-		return
-	}
 	w.jobs.Add(1)
 	go func() {
 		defer w.jobs.Done()
-		defer func() {
-			<-w.sem
-			w.signal()
-		}()
+		defer w.releaseSlot()
 		defer r.close()
 		log.Info("resuming batches from checkpoints")
 		r.execute()
 	}()
+	return true
 }

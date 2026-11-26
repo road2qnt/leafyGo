@@ -721,6 +721,33 @@ func TestRecoveryRequeuesNormalJobWithoutEvidence(t *testing.T) {
 	}
 }
 
+func TestBusyWorkerLeavesExpiredLeaseAlone(t *testing.T) {
+	e := newEnv(t)
+	mig := e.migration(e.db, `select 1`, `select 1`, domain.ModeNormal, "")
+	ref := e.enqueue(e.db, mig, domain.ActionApply, domain.ModeNormal, nil, nil)
+	e.claimAndStart(ref)
+	e.expireLease()
+
+	w := e.worker(func(c *config.WorkerConfig) { c.MaxConcurrentJobs = 1 })
+	w.sem <- struct{}{}
+	w.recoverOnce(e.ctx, e.ctx)
+
+	l, err := e.st.GetDBLock(e.ctx, e.db.ID)
+	if err != nil {
+		t.Fatalf("get lock: %v", err)
+	}
+	if l.WorkerID == w.ID() || l.LockEpoch != 1 {
+		t.Fatalf("lock = %+v; a worker without a free slot must not take it over", l)
+	}
+
+	<-w.sem
+	w.recoverOnce(e.ctx, e.ctx)
+	e.expectState(ref, domain.JobQueued, domain.JobQueued)
+	if len(w.sem) != 0 {
+		t.Fatalf("slots in use after recovery = %d; want 0", len(w.sem))
+	}
+}
+
 func TestRecoveryCompletesNormalJobWithEvidence(t *testing.T) {
 	e := newEnv(t)
 	mig := e.migration(e.db, `select 1`, `select 1`, domain.ModeNormal, "")

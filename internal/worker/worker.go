@@ -126,10 +126,7 @@ func (w *Worker) drain(ctx, jobCtx context.Context) {
 		w.jobs.Add(1)
 		go func() {
 			defer w.jobs.Done()
-			defer func() {
-				<-w.sem
-				w.signal()
-			}()
+			defer w.releaseSlot()
 			w.process(jobCtx, claimed)
 		}()
 	}
