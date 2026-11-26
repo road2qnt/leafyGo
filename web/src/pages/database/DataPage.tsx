@@ -53,6 +53,9 @@ export default function DataPage() {
   });
 
   const data = dataQuery.data;
+  const visibleRows = search
+    ? (data?.rows ?? []).filter((row) => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
+    : (data?.rows ?? []);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -161,7 +164,7 @@ export default function DataPage() {
               </tr>
             </thead>
             <tbody>
-              {(data?.rows ?? []).map((row, index) => (
+              {visibleRows.map((row, index) => (
                 <tr key={index} className="tr-hover">
                   {(data?.columns ?? []).map((column) => {
                     const value = row[column.name];
@@ -182,7 +185,7 @@ export default function DataPage() {
                   })}
                 </tr>
               ))}
-              {data && data.rows.length === 0 ? (
+              {data && visibleRows.length === 0 ? (
                 <TableEmpty colSpan={Math.max(1, data.columns.length)}>
                   No row matches the current filter.
                 </TableEmpty>

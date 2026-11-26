@@ -51,6 +51,12 @@ export default function SchemaPage() {
   }, [dbId]);
 
   const activeTable = tables.find((table) => table.name === selected) ?? tables[0];
+  const detailQuery = useQuery({
+    queryKey: ["database", dbId, "schema-detail", activeTable?.schema, activeTable?.name],
+    queryFn: () => databaseApi.schemaTable(dbId, activeTable as (typeof tables)[number]),
+    enabled: Boolean(activeTable),
+  });
+  const detail = detailQuery.data ?? activeTable;
 
   if (schemaQuery.isLoading) return <PageLoader label="Reading target catalog" />;
   if (schemaQuery.isError) {
@@ -115,7 +121,7 @@ export default function SchemaPage() {
                       <h2 className="text-lg font-semibold text-ink">{activeTable.name}</h2>
                     </div>
                     <div className="flex gap-2">
-                      <span className="badge badge-neutral">{activeTable.columns.length} columns</span>
+                      <span className="badge badge-neutral">{detail?.columns.length ?? activeTable.columns.length} columns</span>
                       <span className="badge badge-neutral">~{formatNumber(activeTable.row_estimate)} rows</span>
                       <span className="badge badge-neutral">{formatBytes(activeTable.size_bytes)}</span>
                     </div>
@@ -135,7 +141,7 @@ export default function SchemaPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {activeTable.columns.map((column) => (
+                        {(detail?.columns ?? []).map((column) => (
                           <tr key={column.name} className="tr-hover">
                             <td className="td">
                               <span className="inline-flex items-center gap-1.5 font-mono text-xs">
@@ -156,7 +162,7 @@ export default function SchemaPage() {
                             </td>
                           </tr>
                         ))}
-                        {activeTable.columns.length === 0 ? (
+                        {(detail?.columns ?? []).length === 0 ? (
                           <TableEmpty colSpan={4}>Catalog returned no columns.</TableEmpty>
                         ) : null}
                       </tbody>

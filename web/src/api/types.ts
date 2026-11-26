@@ -95,6 +95,7 @@ export interface DatabaseOverview {
   level: AccessLevel;
   lock_state: LockState | null;
   active_job: Job | null;
+  active_job_id?: string | null;
   stats: {
     table_count: number;
     row_estimate: number;

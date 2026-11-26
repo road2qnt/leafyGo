@@ -16,6 +16,7 @@ import { Link, useParams } from "react-router";
 
 import { migrationApi } from "../../api/endpoints";
 import type { ApprovalRow } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
 import {
   ActionBadge,
   Button,
@@ -68,6 +69,7 @@ export default function ProposalReviewPage() {
   const { overview } = useDatabaseContext();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
 
   const detailQuery = useQuery({
     queryKey: ["database", dbId, "proposal", proposalId],
@@ -84,6 +86,7 @@ export default function ProposalReviewPage() {
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
   const [decisionError, setDecisionError] = useState<unknown>(null);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [queuedJobID, setQueuedJobID] = useState<string | null>(null);
 
   const canEdit = overview.level === "edit";
 
@@ -105,6 +108,7 @@ export default function ProposalReviewPage() {
         : await migrationApi.reject(dbId, proposalId, comment);
       setComment("");
       await invalidate();
+      if (result.job_id) setQueuedJobID(result.job_id);
       if (result.status === "queued") {
         toast.success("Quorum reached", "The job is queued in the per-database FIFO.");
       } else if (result.status === "rejected") {
@@ -146,9 +150,13 @@ export default function ProposalReviewPage() {
   }
 
   const { proposal, migration, approvers, can_approve, can_withdraw } = detailQuery.data;
+  const canApprove = can_approve || approvers.some((row) => row.leader_id === user?.id && row.decision === null);
+  const canWithdraw =
+    can_withdraw ||
+    (proposal.status === "pending_review" && proposal.proposed_by_username === user?.username);
   const summary = proposal.approval_summary;
   const reviewOpen = proposal.status === "pending_review";
-  const activeJobId = proposal.job_id;
+  const activeJobId = proposal.job_id ?? queuedJobID;
   const dryRun = dryRunMeta(proposal.dry_run_status);
   const dryRunBadge = {
     success: "badge-success",
@@ -187,7 +195,7 @@ export default function ProposalReviewPage() {
             <Link to={`/databases/${dbId}/jobs/${activeJobId}`} className="btn btn-primary">
               Open job monitor <ArrowRight className="h-4 w-4" />
             </Link>
-          ) : can_withdraw ? (
+          ) : canWithdraw ? (
             <Button variant="secondary" onClick={() => void withdraw()} loading={withdrawing}>
               <Undo2 className="h-4 w-4" /> Withdraw
             </Button>
@@ -322,7 +330,7 @@ export default function ProposalReviewPage() {
                 <GitPullRequest className="h-4 w-4 text-leaf-600" />
                 <p className="text-sm font-semibold">Your decision</p>
               </div>
-              {can_approve ? (
+              {canApprove ? (
                 <>
                   <p className="mt-1 text-xs leading-relaxed text-muted">
                     You lead a required group. Comments are written to the immutable approval row.

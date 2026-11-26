@@ -1,15 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  ArrowRight,
-  Database as DatabaseIcon,
-  HardDrive,
-  Plus,
-  Rows3,
-  Table2,
-} from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, ArrowRight, Database as DatabaseIcon, HardDrive, Plus, Rows3, Table2 } from "lucide-react";
 import { Link, useParams } from "react-router";
 
+import { jobApi } from "../../api/endpoints";
 import {
   ActionBadge,
   Button,
@@ -22,13 +15,26 @@ import {
   TableWrap,
 } from "../../components/ui";
 import { formatBytes, formatDateTime, formatNumber, percent } from "../../lib/format";
-import { actionLabel, isActiveJob } from "../../lib/status";
 import { useDatabaseContext } from "./context";
+
 export default function OverviewPage() {
   const { dbId = "" } = useParams();
   const queryClient = useQueryClient();
   const { overview, refetch } = useDatabaseContext();
-  const activeJob = overview.active_job;
+  const activeJobID = overview.active_job_id ?? overview.database.active_job_id ?? null;
+
+  const jobQuery = useQuery({
+    queryKey: ["database", dbId, "overview-job", activeJobID],
+    queryFn: () => jobApi.detail(dbId, activeJobID as string),
+    enabled: Boolean(activeJobID),
+  });
+  const historyQuery = useQuery({
+    queryKey: ["database", dbId, "overview-history"],
+    queryFn: () => jobApi.history(dbId, false),
+  });
+
+  const activeJob = jobQuery.data?.job ?? overview.active_job;
+  const recent = (historyQuery.data?.executions ?? overview.recent_history).slice(0, 6);
   const database = overview.database;
 
   const jobProgress = activeJob ? percent(activeJob.completed_batches, activeJob.total_batches) : 0;
@@ -38,11 +44,15 @@ export default function OverviewPage() {
         <StatCard label="Tables" value={formatNumber(overview.stats.table_count)} icon={Table2} />
         <StatCard
           label="Estimated rows"
-          value={formatNumber(overview.stats.row_estimate)}
-          hint="Includes estimator noise; not an exact count."
+          value={overview.stats.row_estimate > 0 ? formatNumber(overview.stats.row_estimate) : "—"}
+          hint="Estimator only when the target exposes row counts."
           icon={Rows3}
         />
-        <StatCard label="On-disk size" value={formatBytes(overview.stats.total_size_bytes)} icon={HardDrive} />
+        <StatCard
+          label="On-disk size"
+          value={overview.stats.total_size_bytes > 0 ? formatBytes(overview.stats.total_size_bytes) : "—"}
+          icon={HardDrive}
+        />
         <StatCard
           label="Access level"
           value={overview.level === "edit" ? "View + Edit" : "View only"}
@@ -181,7 +191,7 @@ export default function OverviewPage() {
               </tr>
             </thead>
             <tbody>
-              {overview.recent_history.map((execution) => (
+              {recent.map((execution) => (
                 <tr key={execution.execution_id} className="tr-hover">
                   <td className="td font-mono text-xs text-muted">#{execution.seq_order}</td>
                   <td className="td">
@@ -208,7 +218,7 @@ export default function OverviewPage() {
                   </td>
                 </tr>
               ))}
-              {overview.recent_history.length === 0 ? (
+              {recent.length === 0 ? (
                 <TableEmpty colSpan={9}>No executions yet for this database.</TableEmpty>
               ) : null}
             </tbody>

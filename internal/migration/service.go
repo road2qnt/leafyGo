@@ -102,6 +102,18 @@ func (s *Service) DryRunGuard() *DryRunGuard {
 	return s.dryRunGuard
 }
 
+// ValidateDefinition runs the same pre-review dry-run used at submit time
+// without creating a proposal.
+func (s *Service) ValidateDefinition(ctx context.Context, actor domain.User, level domain.AccessLevel, db domain.DBConnection, def domain.MigrationDefinition) (DryRunResult, error) {
+	if !level.CanEdit() {
+		return DryRunResult{}, ErrForbidden
+	}
+	if def.DBID != db.ID {
+		return DryRunResult{}, ErrNotFound
+	}
+	return RunPreReviewDryRun(ctx, s.connOpener, s.dryRunGuard, db, actor.ID, uuid.New(), def, domain.ActionApply)
+}
+
 func mapStoreWorkflowError(err error) error {
 	if err == nil {
 		return nil

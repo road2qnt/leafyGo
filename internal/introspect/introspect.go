@@ -19,58 +19,58 @@ var (
 const maxCellChars = 201
 
 type Table struct {
-	Schema    string
-	Name      string
-	Kind      string
-	RowCount  *int64
-	CanSelect bool
+	Schema    string `json:"schema"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	RowCount  *int64 `json:"row_count,omitempty"`
+	CanSelect bool   `json:"can_select"`
 }
 
 type Column struct {
-	Name     string
-	DataType string
-	Nullable bool
-	Default  string
-	IsPK     bool
-	Ordinal  int
+	Name     string `json:"name"`
+	DataType string `json:"data_type"`
+	Nullable bool   `json:"nullable"`
+	Default  string `json:"default_value"`
+	IsPK     bool   `json:"is_primary_key"`
+	Ordinal  int    `json:"ordinal"`
 }
 
 type Constraint struct {
-	Name       string
-	Type       string
-	Definition string
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Definition string `json:"definition"`
 }
 
 type Index struct {
-	Name       string
-	Unique     bool
-	Primary    bool
-	Definition string
+	Name       string `json:"name"`
+	Unique     bool   `json:"unique"`
+	Primary    bool   `json:"primary"`
+	Definition string `json:"definition"`
 }
 
 type TableDetail struct {
 	Table
-	Columns     []Column
-	Constraints []Constraint
-	Indexes     []Index
-	PrimaryKey  []string
+	Columns     []Column     `json:"columns"`
+	Constraints []Constraint `json:"constraints"`
+	Indexes     []Index      `json:"indexes"`
+	PrimaryKey  []string     `json:"primary_key"`
 }
 
 type Cell struct {
-	Text   string
-	IsNull bool
+	Text   string `json:"text"`
+	IsNull bool   `json:"is_null"`
 }
 
 type PageColumn struct {
-	Name    string
-	Numeric bool
+	Name    string `json:"name"`
+	Numeric bool   `json:"numeric"`
 }
 
 type Page struct {
-	Columns []PageColumn
-	Rows    [][]Cell
-	HasNext bool
-	Ordered bool
+	Columns []PageColumn `json:"columns"`
+	Rows    [][]Cell     `json:"rows"`
+	HasNext bool         `json:"has_next"`
+	Ordered bool         `json:"ordered"`
 }
 
 const relationFilter = `

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"leafygo/internal/domain"
 	"leafygo/internal/introspect"
@@ -242,6 +243,35 @@ func (s *Server) handleAPIDatabaseData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleAPIDatabaseQueryExplain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SQL string `json:"sql"`
+	}
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	sql := strings.ReplaceAll(req.SQL, "\r\n", "\n")
+	if strings.TrimSpace(sql) == "" {
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "SQL must not be empty.")
+		return
+	}
+	if msg, _ := explainPrecheck(sql); msg != "" {
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, msg)
+		return
+	}
+	start := time.Now()
+	plan, err := s.targets.Explain(r.Context(), *currentDB(r), sql, s.cfg.QueryTimeout)
+	if err != nil {
+		s.logTargetError(r, err)
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, targetErrorText(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan":        plan,
+		"duration_ms": time.Since(start).Milliseconds(),
+	})
+}
+
 func (s *Server) handleAPIDatabaseQuery(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SQL string `json:"sql"`
@@ -285,4 +315,3 @@ func (s *Server) handleAPIDatabaseQuery(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusOK, res)
 }
-

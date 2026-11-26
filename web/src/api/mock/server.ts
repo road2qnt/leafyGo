@@ -625,10 +625,49 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
         return ok(group);
       }
       if (parts.length === 3 && method === "DELETE") {
+        if (search.get("soft") === "true") {
+          group.access = [];
+          group.leader_id = null;
+          group.leader_username = null;
+          group.description = `${group.description} (deactivated)`.trim();
+          return ok({ status: "deleted" });
+        }
         const hasHistory = Object.values(state.approvals).some((rows) => rows.some((row) => row.group_id === group.id));
         if (hasHistory) mockError(409, "GROUP_HAS_HISTORY", "This group appears in approval history.");
         state.groups = state.groups.filter((entry) => entry.id !== group.id);
         return noContent();
+      }
+      if (parts[3] === "members" && method === "POST") {
+        const userId = String(body.user_id ?? "");
+        const user = state.users.find((entry) => entry.id === userId && entry.is_active);
+        if (!user) mockError(404, "USER_NOT_FOUND", "User not found.");
+        if (user.is_platform_admin) mockError(422, "ADMIN_GROUP_MEMBER", "Platform Admins cannot join groups.");
+        if (!group.members.some((member) => member.id === user.id)) {
+          group.members = [...group.members, { id: user.id, username: user.username }];
+        }
+        return ok(group);
+      }
+      if (parts[3] === "members" && method === "DELETE" && parts[4]) {
+        group.members = group.members.filter((member) => member.id !== parts[4]);
+        if (group.leader_id === parts[4]) {
+          group.leader_id = null;
+          group.leader_username = null;
+        }
+        return ok(group);
+      }
+      if (parts[3] === "access" && method === "POST") {
+        const dbId = String(body.db_id ?? "");
+        const database = state.databases.find((entry) => entry.id === dbId);
+        if (!database) mockError(404, "DATABASE_NOT_FOUND", "Database not found.");
+        group.access = group.access.filter((grant) => grant.db_id !== dbId);
+        if (body.level !== "none") {
+          group.access.push({
+            db_id: database.id,
+            db_name: database.name,
+            level: body.level === "edit" ? "edit" : "view",
+          });
+        }
+        return ok(group);
       }
       if (parts[3] === "leader" && method === "PUT") {
         const leaderId = body.leader_id as string | null;
@@ -739,9 +778,9 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
       }
       if (parts[3] === "test" && method === "POST") {
         if (database.host.includes("bad") || database.db_name.includes("missing")) {
-          return ok({ ok: false, error: "dial tcp: connection refused", latency_ms: 12 });
+          return ok({ ok: false, status: "failed", error: "dial tcp: connection refused", latency_ms: 12 });
         }
-        return ok({ ok: true, latency_ms: 23 });
+        return ok({ ok: true, status: "ok", latency_ms: 23 });
       }
       mockError(404, "NOT_FOUND", "Database route not found.");
     }

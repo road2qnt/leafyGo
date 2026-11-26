@@ -191,6 +191,32 @@ func (s *Server) handleAPIMigrationUpdate(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (s *Server) handleAPIMigrationValidate(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	db := currentDB(r)
+	level := currentLevel(r)
+	mid, ok := urlID(r, "mid")
+	if !ok {
+		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Migration definition not found.")
+		return
+	}
+	def, err := s.store.GetMigrationDefinition(r.Context(), db.ID, mid)
+	if err != nil {
+		s.writeMigrationWorkflowError(w, r, err)
+		return
+	}
+	res, err := s.migrations.ValidateDefinition(r.Context(), *user, level, *db, def)
+	if err != nil {
+		s.writeMigrationWorkflowError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dry_run_status": res.Status,
+		"message":        res.Warning,
+		"sqlstate":       res.SQLState,
+	})
+}
+
 func (s *Server) handleAPIProposalsList(w http.ResponseWriter, r *http.Request) {
 	db := currentDB(r)
 	proposals, err := s.store.ListMigrationProposals(r.Context(), db.ID)
@@ -371,4 +397,3 @@ func (s *Server) handleAPIProposalReject(w http.ResponseWriter, r *http.Request)
 		"proposal": prop,
 	})
 }
-

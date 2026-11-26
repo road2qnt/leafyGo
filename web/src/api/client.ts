@@ -83,7 +83,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   }
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && !path.startsWith("/auth/login") && !path.startsWith("/auth/me")) {
       window.dispatchEvent(new CustomEvent("leafygo:unauthorized"));
     }
     const envelope = parsed as ApiErrorBody | null;

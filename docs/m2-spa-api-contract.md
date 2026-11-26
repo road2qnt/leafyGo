@@ -1,210 +1,159 @@
-# SPA ↔ REST API contract (M2)
+# SPA ↔ REST API contract (M2, post-merge)
 
-This is the handshake between the SPA (`web/`) and the Go API owned by P1/P2.
-The SPA already calls every path below. While the endpoints are being built it
-runs against an in-browser mock (`VITE_USE_MOCKS=true`), so the real API can land
-incrementally without breaking the UI.
+This is the handshake between the SPA (`web/`) and the Go handlers that shipped in
+`origin/main` (`internal/web/handlers_api_*.go`). The SPA normalizes the actual
+response shapes in `web/src/api/normalize.ts`; `web/src/api/endpoints.ts` is the
+only place that knows raw field names.
 
-Sources of truth:
-
-- TypeScript shapes: `web/src/api/types.ts`
-- Client + error mapping: `web/src/api/client.ts`
-- Path wrappers: `web/src/api/endpoints.ts`
-- Mock behaviour/scenarios: `web/src/api/mock/server.ts`
+While the backend was still being built the SPA ran on an in-browser mock. The
+committed bundle defaults to the real API. Demo mode is still available with
+`?mock=1` (persisted in localStorage; `?mock=0` disables it).
 
 ## Conventions
 
 - All paths are under `/api/v1/`.
-- JSON in, JSON out; timestamps are RFC3339 strings.
-- Session is the existing opaque `sid` cookie. Mutations require the
-  `X-CSRF-Token` header returned by login/me.
-- Every response should echo `X-Correlation-ID` and `X-Trace-ID`; the SPA shows
-  both in error banners. Incoming `X-Correlation-ID` and W3C `traceparent` are
-  propagated by `internal/web/middleware_otel.go`.
-- 204 responses have no body.
+- Session is the existing opaque `sid` cookie. Mutations require
+  `X-CSRF-Token` from login/me.
+- Every response echoes `X-Correlation-ID` and `X-Trace-ID`.
 - Errors use the M2 envelope:
 
 ```json
-{
-  "error": {
-    "code": "PREDECESSOR_NOT_READY",
-    "message": "The predecessor slot must be Active or queued first.",
-    "correlation_id": "req-9f8a7b6c",
-    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
-  }
-}
+{ "error": { "code": "...", "message": "...", "correlation_id": "...", "trace_id": "..." } }
 ```
 
 ## Auth
 
-| Method | Path | Response |
+| Method | Path | Actual response |
 |---|---|---|
-| POST | `/auth/login` | `{ user, csrf_token, leader_of_groups: [{id,name}] }` |
-| POST | `/auth/logout` | 204 |
-| GET | `/auth/me` | same shape as login; 401 when no session |
+| POST | `/auth/login` | flat user: `{id, username, is_platform_admin, is_admin, is_active, csrf_token, leader_of_groups:[uuid]}` |
+| POST | `/auth/logout` | `{status:"logged_out"}` |
+| GET | `/auth/me` | same flat shape |
 
-`user`: `{ id, username, is_platform_admin, is_active, created_at }`.
+The SPA adapter turns this into `{user, csrf_token, leader_of_groups:[{id,name}]}`
+(names fall back to a short id because the endpoint only returns UUIDs).
 
-## Admin (Platform Admin only)
+## Admin
 
-Users:
-
-| Method | Path | Body / response |
-|---|---|---|
-| GET | `/admin/users` | `{ users: User[] }` |
-| POST | `/admin/users` | `{ username, password, is_platform_admin }` → `User` |
-| POST | `/admin/users/{id}/password` | `{ password }` → 204 |
-| POST | `/admin/users/{id}/active` | `{ is_active }` → `User` |
-| DELETE | `/admin/users/{id}` | 204, or `409 USER_HAS_HISTORY` |
+Users: `GET/POST /admin/users`, `POST /admin/users/{id}/password`,
+`POST /admin/users/{id}/active` (`{is_active}`), `DELETE /admin/users/{id}`.
 
 Groups:
 
-| Method | Path | Body / response |
+| Method | Path | Body |
 |---|---|---|
-| GET | `/admin/groups` | `{ groups: Group[] }` |
-| POST | `/admin/groups` | `{ name, description }` → `Group` |
-| PUT | `/admin/groups/{id}` | `{ name, description }` → `Group` |
-| PUT | `/admin/groups/{id}/leader` | `{ leader_id: string \| null }` → `Group` |
-| PUT | `/admin/groups/{id}/members` | `{ user_ids: string[] }` → `Group` |
-| PUT | `/admin/groups/{id}/access` | `{ grants: [{ db_id, level: "view"\|"edit" }] }` → `Group` |
-| DELETE | `/admin/groups/{id}` | 204, or `409 GROUP_HAS_HISTORY` |
-| POST | `/admin/groups/{id}/deactivate` | 204 (optional soft delete) |
+| GET/POST | `/admin/groups` | `{name, description}` |
+| PUT | `/admin/groups/{id}` | `{name, description}` |
+| PUT | `/admin/groups/{id}/leader` | `{leader_id}` |
+| POST | `/admin/groups/{id}/members` | `{user_id}` (one member) |
+| DELETE | `/admin/groups/{id}/members/{userID}` | — |
+| POST | `/admin/groups/{id}/access` | `{db_id, level: "view"|"edit"|"none"}` |
+| DELETE | `/admin/groups/{id}?soft=true` | optional soft delete |
 
-`Group` carries `leader_id`, `leader_username`, `members: [{id,username}]`, and
-`access: [{db_id, db_name, level}]`. The SPA shows a leader selector and an
-optional soft-delete section.
+The SPA's “save members/access” computes the diff and calls these single-item
+endpoints. A hard delete with approval history returns `409 GROUP_HAS_HISTORY`;
+soft delete is the safe fallback.
 
 Connections:
 
-| Method | Path | Body / response |
+| Method | Path | Notes |
 |---|---|---|
-| GET | `/admin/databases` | `{ databases: Database[] }` |
-| POST | `/admin/databases` | `{ name, host, port, db_name, username, password, ssl_mode }` → `Database` |
-| PUT | `/admin/databases/{id}` | same fields, `password` optional → `Database` |
-| POST | `/admin/databases/{id}/test` | `{ ok, error?, latency_ms? }` |
-| DELETE | `/admin/databases/{id}` | 204, or `409 DB_HAS_ACTIVE_WORK` |
+| GET/POST | `/admin/databases` | request uses `dbname` and `sslmode` (not `db_name`/`ssl_mode`) |
+| PUT | `/admin/databases/{id}` | same fields; empty password keeps the secret |
+| POST | `/admin/databases/{id}/test` | `{status:"ok", message}` |
+| DELETE | `/admin/databases/{id}` | `409 DB_HAS_ACTIVE_WORK` while locked/active |
 
-## Database workspace (LevelView+)
+The SPA maps `dbname`/`sslmode` to its `db_name`/`ssl_mode` model in
+`normalizeDatabase`.
 
-| Method | Path | Response |
+## Database workspace
+
+| Method | Path | Actual response |
 |---|---|---|
-| GET | `/databases` | `{ databases: Database[] }` — only accessible DBs; each adds `level`, `lock_state`, `active_job_id` |
-| GET | `/databases/{id}/overview` | `{ database, level, lock_state, active_job, stats, recent_history }` |
-| GET | `/databases/{id}/schema` | `{ tables: SchemaTable[] }` (hide `_leafygo_*`) |
-| GET | `/databases/{id}/data?table=&page=&page_size=&q=` | `DataResponse` |
-| POST | `/databases/{id}/query` | `{ sql }` → `{ columns, rows, row_count, duration_ms, truncated, notices }` |
-| POST | `/databases/{id}/query/explain` | `{ sql }` → `{ plan, duration_ms }` |
+| GET | `/databases` | `{databases:[{...connection, access_level, lock_state, lock}]}` |
+| GET | `/databases/{id}/overview` | `{database, access_level, lock_state, lock, table_count, active_migration_stack, required_approver_groups}` |
+| GET | `/databases/{id}/schema` | `{tables:[{schema,name,kind,row_count,can_select}]}` |
+| GET | `/databases/{id}/schema?schema=&table=` | adds `detail:{columns,constraints,indexes,primary_key}` |
+| GET | `/databases/{id}/data?table=&page=&limit=` | `{columns:[{name,numeric}], rows:[[{text,is_null}]], page, page_size, row_count, has_next}` |
+| POST | `/databases/{id}/query` | queryconsole Result: `{columns:[string], rows:[[Cell]], row_count, truncated, duration_ns, command_tag}` |
+| POST | `/databases/{id}/query/explain` | `{plan, duration_ms}` (added in this branch) |
+| POST | `/databases/{id}/migrations/{mid}/validate` | `{dry_run_status, message, sqlstate}` (added in this branch) |
 
-Stats are `{ table_count, row_estimate, total_size_bytes }`.
-`active_job` is `Job | null`.
+Normalization notes:
 
-Platform Admin accounts must not access database tools; return `403` (M1 rule).
+- Overview has no eager history/stats; the SPA fetches `history` separately and
+  shows `—` when row/size estimates are absent. `lock.job_id` becomes
+  `active_job_id`, then the job is fetched for the progress card.
+- Schema list has no columns; the SPA fetches the selected table detail.
+- Data/query rows are cell-array responses; the adapter turns them into objects
+  keyed by column name.
+- Data search is applied client-side to the current page because the API has no
+  free-text filter.
 
-## Definitions & proposals (LevelEdit required to mutate)
+## Definitions, proposals, history, jobs
 
-| Method | Path | Body / response |
+| Method | Path | Actual response |
 |---|---|---|
-| GET | `/databases/{id}/migrations` | `{ migrations: MigrationDefinition[] }` |
-| POST | `/databases/{id}/migrations` | `MigrationInput` → definition |
-| PUT | `/databases/{id}/migrations/{mid}` | `MigrationInput` → definition |
-| POST | `/databases/{id}/migrations/{mid}/validate` | `DryRunResult` |
-| GET | `/databases/{id}/proposals` | `{ proposals: Proposal[] }` |
-| POST | `/databases/{id}/proposals` | `{ migration_id, action_type, target_execution_id?, resolution?, reason? }` → `Proposal` |
-| GET | `/databases/{id}/proposals/{pid}` | `ProposalDetail` |
-| POST | `/databases/{id}/proposals/{pid}/approve` | `{ comment }` → `Proposal` |
-| POST | `/databases/{id}/proposals/{pid}/reject` | `{ comment }` → `Proposal` |
-| POST | `/databases/{id}/proposals/{pid}/withdraw` | `Proposal` |
+| GET | `/databases/{id}/migrations` | `{migrations, active_stack, top_rollback_target, next_forward_target}` |
+| POST | `/databases/{id}/migrations` | definition (`revision` required on update) |
+| PUT | `/databases/{id}/migrations/{mid}` | definition |
+| GET | `/databases/{id}/proposals` | `{proposals}` |
+| POST | `/databases/{id}/proposals` | `{proposal, dry_run_status, dry_run_warning, dry_run}` |
+| GET | `/databases/{id}/proposals/{pid}` | proposal + `approvers[]` + `approvals[]` |
+| POST | `/databases/{id}/proposals/{pid}/approve` | `{status, proposal, job_id?, execution_id?, ...}` |
+| POST | `/databases/{id}/proposals/{pid}/reject` | `{status, proposal}` |
+| POST | `/databases/{id}/proposals/{pid}/withdraw` | `{status, proposal}` |
+| GET | `/databases/{id}/history?hide_rollback=true` | `{hide_rollback, executions}` |
+| GET | `/databases/{id}/jobs/{jobID}` | flat job (`jobStatusResponse`) |
 
-`MigrationInput`:
+Definitions already carry `latest_proposal`/`latest_execution`; the adapter
+derives `active_proposal` and `latest_status` from them. Proposal detail is
+joined into an approval matrix; `can_approve`/`can_withdraw` are computed in the
+SPA from the current user and the approver rows.
 
-```ts
-{
-  title, description,
-  sql_up, sql_down,
-  is_irreversible, irreversible_reason,
-  execution_mode: "normal" | "batch",
-  batch_config: { table_name, cursor_col, batch_size, updated_at_col? } | null,
-  replaces_migration_id: string | null
-}
-```
+The job endpoint is flat. The adapter joins `migrations` for the title and
+fetches history to expose attempts for the same `root_execution_id`. Added job
+fields in this branch: `queue_seq`, `worker_id`, `trace_parent`, `trace_state`,
+`correlation_id`.
 
-`DryRunResult`: `{ dry_run_status: "passed"|"inconclusive"|"failed", message?, sqlstate?, duration_ms? }`.
-`inconclusive` (57014/55P03) must **not** block review; the SPA renders a warning.
+`hide_rollback` is server-authoritative; the SPA refetches with the flag.
 
-`ProposalDetail`:
+## Optional / not implemented
 
-```ts
-{
-  proposal: Proposal,
-  migration: MigrationDefinition,
-  approvers: Array<{
-    group_id, group_name, leader_id, leader_username,
-    access_level: "view"|"edit",
-    decision: "approved"|"rejected"|null,
-    comment, decided_at: string|null
-  }>,
-  can_approve: boolean,
-  can_withdraw: boolean
-}
-```
+- `GET /workers/status` (worker liveness) is not implemented. The SPA shows the
+  optional “endpoint unavailable” callout; queue behaviour is unaffected.
+- `query/to-draft` is not used; the SPA creates a normal migration definition
+  instead.
 
-When the last approval queues the job, include `job_id` on the returned
-`Proposal`; the review page links straight to `/databases/{id}/jobs/{job_id}`.
-
-`resolve_uncertain` requires `target_execution_id`, `resolution`
-(`committed`/`not_committed`), and a non-empty `reason`. The UI labels it as an
-optional/advanced action and surfaces `RESOLVE_UNCERTAIN_INVALID`.
-
-## Jobs & history
-
-| Method | Path | Response |
-|---|---|---|
-| GET | `/databases/{id}/jobs/{jobID}` | `{ job, lock_state, attempts: Execution[], progress }` |
-| GET | `/databases/{id}/history?hide_rollback=true` | `{ executions: Execution[] }` |
-| GET | `/workers/status` | `{ workers: [{ worker_id, hostname, active_jobs, last_seen_at, online }] }` (optional) |
-
-`Job` includes `execution_id`, `root_execution_id`, cumulative
-`completed_batches`/`committed_rows`, `total_batches`, `retry_count`,
-`last_cursor`, `scope_min_cursor`, `scope_max_cursor`, `worker_id`,
-`lock_state`, and `trace_id`.
-
-`progress`: `{ completed_batches, total_batches, committed_rows, percent }`.
-
-The SPA polls the job every 1.5s while `queued|running|partial|partially_reverted|uncertain`;
-return cached/consistent cumulative numbers so the bar never regresses.
-
-`Execution` includes `executed_sql` when available. The history page opens the
-immutable SQL snapshot in a modal. `hide_rollback` is server-authoritative: the
-SPA refetches with the flag instead of filtering a second time. The shared
-root-grouping helper (`web/src/lib/history.ts`) still backs the mock and is
-unit-tested, so the server and demo implement the same rule.
-
-## Mandatory error codes used by the UI
+## Error codes used by the UI
 
 `INVALID_MIGRATION_SQL`, `NON_TRANSACTIONAL_STATEMENT`,
 `INVALID_BATCH_IDENTIFIER`, `INVALID_BATCH_CURSOR_TYPE`, `DRY_RUN_BUSY`,
 `DUPLICATE_ACTIVE_PROPOSAL`, `PREDECESSOR_NOT_READY`, `PREDECESSOR_FAILED`,
-`APPROVER_SET_CHANGED`, `NO_ACCESS_GROUPS`, `MIGRATION_NOT_SUPERSEDABLE`,
-`USER_HAS_HISTORY`, `GROUP_HAS_HISTORY`, `DB_HAS_HISTORY`, `DB_HAS_ACTIVE_WORK`,
-`UNCERTAIN_MANUAL_INTERVENTION`, `RESOLVE_UNCERTAIN_INVALID`,
-`UNSAFE_BATCH_REVERT`, `FORBIDDEN_NOT_GROUP_LEADER`, `FORBIDDEN`.
+`APPROVER_SET_CHANGED`, `NO_ACCESS_GROUPS`, `MISSING_GROUP_LEADER`,
+`MIGRATION_NOT_SUPERSEDABLE`, `USER_HAS_HISTORY`, `GROUP_HAS_HISTORY`,
+`DB_HAS_HISTORY`, `DB_HAS_ACTIVE_WORK`, `UNCERTAIN_MANUAL_INTERVENTION`,
+`RESOLVE_UNCERTAIN_INVALID`, `UNSAFE_BATCH_REVERT`,
+`FORBIDDEN_NOT_GROUP_LEADER`, `FORBIDDEN`.
 
-Human guidance per code lives in `web/src/lib/status.ts` (`errorGuidance`).
+Guidance text per code: `web/src/lib/status.ts`.
 
-## Metrics endpoint
+## Metrics
 
-- `GET /metrics` is public, outside auth, and is excluded from request spans/logs.
-- `leafygo_migration_jobs_current{status,db_name}` must be registered only by
-  `cmd/server` (`telemetry.PlatformJobCountSource`); worker replicas must not
-  register it.
-- Worker should expose `/metrics` on `:8081` for Prometheus (`prometheus.yml`).
+`GET /metrics` is public and excluded from request spans/logs.
+`leafygo_migration_jobs_current` is registered only by `cmd/server`
+(`telemetry.PlatformJobCountSource`); worker replicas must not register it.
 
-## Remaining integration tasks (P1/P2)
+## Telemetry integration points (P1/P2)
 
-1. Implement the JSON handlers and return the shapes above.
-2. Add `job_id` to the approve response when the proposal queues.
-3. Add `executed_sql` to history rows.
-4. Implement `GET /workers/status` (optional) or leave it 404; the SPA handles
-   that gracefully.
-5. Wire telemetry helpers (`telemetry.StartSpan`, `LogSQL*`) into handlers,
-   queue, and worker. See `docs/m2-ega-workplan.md`.
+HTTP spans, correlation ids, request logs, SQL helpers, and the SPA host are
+wired for the API server. Worker spans/metrics still need the calls listed in
+`docs/m2-ega-workplan.md`:
+
+```go
+ctx, span := telemetry.StartSpan(ctx, "worker.process_job")
+traceParent, traceState := telemetry.InjectTraceContext(ctx)
+ctx = telemetry.ExtractTraceContext(ctx, job.TraceParent, job.TraceState)
+telemetry.LogSQLStart(ctx, meta)
+telemetry.LogSQLResult(ctx, meta, rows, duration, err)
+telemetry.LogSQLTxEnd(ctx, meta, "commit", duration, nil)
+```

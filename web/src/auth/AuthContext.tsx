@@ -30,15 +30,25 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const AUTH_FLAG = "leafygo-auth";
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [csrfToken, setToken] = useState("");
   const [leaderOfGroups, setLeaderOfGroups] = useState<GroupRef[]>([]);
+  const [hasSession, setHasSession] = useState(() => {
+    try {
+      return window.localStorage.getItem(AUTH_FLAG) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const meQuery = useQuery({
     queryKey: ["auth", "me"],
     queryFn: authApi.me,
+    enabled: hasSession,
     retry: false,
     refetchOnWindowFocus: false,
     staleTime: 60_000,
@@ -59,6 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken("");
       setLeaderOfGroups([]);
       setCsrfToken("");
+      setHasSession(false);
+      try {
+        window.localStorage.removeItem(AUTH_FLAG);
+      } catch {
+        // private mode
+      }
     }
   }, [meQuery.isError]);
 
@@ -68,6 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken("");
       setLeaderOfGroups([]);
       setCsrfToken("");
+      setHasSession(false);
+      try {
+        window.localStorage.removeItem(AUTH_FLAG);
+      } catch {
+        // private mode
+      }
       queryClient.clear();
     };
     window.addEventListener("leafygo:unauthorized", handleUnauthorized);
@@ -81,6 +103,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(response.csrf_token);
       setLeaderOfGroups(response.leader_of_groups);
       setCsrfToken(response.csrf_token);
+      setHasSession(true);
+      try {
+        window.localStorage.setItem(AUTH_FLAG, "1");
+      } catch {
+        // private mode
+      }
       queryClient.setQueryData(["auth", "me"], response);
       await queryClient.invalidateQueries({ queryKey: ["databases"] });
       return response;
@@ -96,6 +124,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken("");
       setLeaderOfGroups([]);
       setCsrfToken("");
+      setHasSession(false);
+      try {
+        window.localStorage.removeItem(AUTH_FLAG);
+      } catch {
+        // private mode
+      }
       queryClient.clear();
     }
   }, [queryClient]);
@@ -105,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       csrfToken,
       leaderOfGroups,
-      loading: meQuery.isLoading,
+      loading: hasSession && meQuery.isLoading,
       login,
       logout,
       isLeader: leaderOfGroups.length > 0,

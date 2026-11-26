@@ -213,11 +213,13 @@ func (s *Server) Handler() http.Handler {
 				r.With(s.apiRequireDBAction(access.ActionViewSchema)).Get("/schema", s.handleAPIDatabaseSchema)
 				r.With(s.apiRequireDBAction(access.ActionViewData)).Get("/data", s.handleAPIDatabaseData)
 				r.With(s.apiRequireDBAction(access.ActionQueryConsole)).Post("/query", s.handleAPIDatabaseQuery)
+				r.With(s.apiRequireDBAction(access.ActionQueryConsole)).Post("/query/explain", s.handleAPIDatabaseQueryExplain)
 
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleAPIMigrationsList)
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/migrations", s.handleAPIMigrationCreate)
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/migrations/{mid}", s.handleAPIMigrationGet)
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Put("/migrations/{mid}", s.handleAPIMigrationUpdate)
+				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/migrations/{mid}/validate", s.handleAPIMigrationValidate)
 
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/proposals", s.handleAPIProposalsList)
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/proposals", s.handleAPIProposalSubmit)

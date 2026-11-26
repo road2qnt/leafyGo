@@ -210,7 +210,10 @@ export default function MigrationEditorPage() {
         await invalidate();
         navigate(`/databases/${dbId}/migrations/${created.id}/edit`, { replace: true });
       } else if (migration) {
-        const updated = await migrationApi.update(dbId, migration.id, input);
+        const updated = await migrationApi.update(dbId, migration.id, {
+        ...input,
+        revision: migration.revision,
+      });
         setForm(formFor(updated));
         toast.success("Definition saved", `Revision ${updated.revision} is ready for validation.`);
         await invalidate();

@@ -56,6 +56,11 @@ terakhir proposal Inventory; login sebagai `jibril` untuk melihat
 Akun demo: `jibril`, `putra`, `ega` dengan password `password123`; `admin`
 dengan password `admin12345`.
 
+SPA sekarang juga terhubung ke API asli hasil merge P1/P2. Untuk data seed M1/M2
+gunakan akun seed seperti `andi` / `bayu` / `putri` (password `password123`) dan
+`admin` / `admin12345`; mode mock dengan akun `jibril`/`putra`/`ega` hanya untuk
+demo tanpa backend.
+
 Build ulang SPA setelah mengubah `web/`:
 
 ```bash

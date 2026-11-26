@@ -14,6 +14,7 @@ import (
 
 type jobStatusResponse struct {
 	JobID            uuid.UUID  `json:"job_id"`
+	QueueSeq         int64      `json:"queue_seq"`
 	DBID             uuid.UUID  `json:"db_id"`
 	ProposalID       uuid.UUID  `json:"proposal_id"`
 	MigrationID      uuid.UUID  `json:"migration_id"`
@@ -33,6 +34,10 @@ type jobStatusResponse struct {
 	ScopeMaxCursor   *int64     `json:"scope_max_cursor"`
 	LastError        string     `json:"last_error"`
 	LockState        *string    `json:"lock_state"`
+	WorkerID         string     `json:"worker_id,omitempty"`
+	TraceParent      string     `json:"trace_parent"`
+	TraceState       string     `json:"trace_state"`
+	CorrelationID    string     `json:"correlation_id"`
 	QueuedAt         time.Time  `json:"queued_at"`
 	StartedAt        *time.Time `json:"started_at"`
 	FinishedAt       *time.Time `json:"finished_at"`
@@ -42,6 +47,7 @@ type jobStatusResponse struct {
 func newJobStatusResponse(j domain.MigrationJob, lock *domain.DBLock) jobStatusResponse {
 	resp := jobStatusResponse{
 		JobID:            j.ID,
+		QueueSeq:         j.QueueSeq,
 		DBID:             j.DBID,
 		ProposalID:       j.ProposalID,
 		MigrationID:      j.MigrationID,
@@ -60,6 +66,10 @@ func newJobStatusResponse(j domain.MigrationJob, lock *domain.DBLock) jobStatusR
 		ScopeMinCursor:   j.ScopeMinCursor,
 		ScopeMaxCursor:   j.ScopeMaxCursor,
 		LastError:        j.LastError,
+		WorkerID:         j.WorkerID,
+		TraceParent:      j.TraceParent,
+		TraceState:       j.TraceState,
+		CorrelationID:    j.CorrelationID,
 		QueuedAt:         j.QueuedAt,
 		StartedAt:        j.StartedAt,
 		FinishedAt:       j.FinishedAt,
