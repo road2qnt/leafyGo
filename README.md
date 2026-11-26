@@ -167,6 +167,10 @@ ketentuan reset ada di [docs/seed.md](docs/seed.md).
 
 Worker migrasi, pemulihan lock, dan dataset uji besar dijelaskan di [docs/worker.md](docs/worker.md).
 
+## Stress test (k6)
+
+Script, cara menjalankan, hasil per tingkat beban, dan analisisnya ada di [docs/stress-test.md](docs/stress-test.md).
+
 ## Pembagian kerja
 
 |   NIM    | Nama                    | Bagian kerja                                  |
