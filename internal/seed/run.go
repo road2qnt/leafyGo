@@ -67,7 +67,7 @@ func Run(ctx context.Context, deps Deps, opts Options) error {
 		return fmt.Errorf("measure bench dataset: %w", err)
 	}
 	r.log.Info("bench dataset", "db", targets.BenchDBName, "table", targets.BenchTable,
-		"rows", bench.Rows, "unbatched_update_ms", bench.Duration.Milliseconds(), "statement", targets.BenchUnbatchedUpdate)
+		"rows", bench.Rows, "unbatched_update_ms", bench.Duration.Milliseconds(), "statement", targets.BenchUnbatchedUpdateSQL(targets.BenchTable))
 	if bench.Duration <= time.Second {
 		r.log.Warn("unbatched update on the bench dataset took one second or less, raise targets.BenchRows")
 	}

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"leafygo/internal/domain"
 	"leafygo/internal/platform"
 	"leafygo/internal/secret"
+	"leafygo/internal/seed/targets"
 	"leafygo/internal/store"
 	"leafygo/internal/target"
 )
@@ -874,5 +876,52 @@ func TestCorrectiveMigrationSupersedesFailedOne(t *testing.T) {
 	}
 	if !superseded || by == nil || *by != fix {
 		t.Fatalf("superseded = %v by %v; want true by %s", superseded, by, fix)
+	}
+}
+
+// Runs the change that takes over a second unbatched as a batch migration on the seeder's dataset.
+func TestBatchMigrationOnBenchDataset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the full bench dataset")
+	}
+	e := newEnv(t)
+	table := testSchema + "." + targets.BenchTable
+	conn := e.targetConn(e.targetCfg)
+	if err := targets.CreateBenchTable(e.ctx, conn, table, targets.BenchRows); err != nil {
+		t.Fatalf("create bench table: %v", err)
+	}
+	if _, err := conn.Exec(e.ctx, `vacuum analyze `+table); err != nil {
+		t.Fatalf("vacuum bench table: %v", err)
+	}
+	unbatched, err := targets.MeasureUnbatchedUpdate(e.ctx, conn, table)
+	if err != nil {
+		t.Fatalf("measure unbatched update: %v", err)
+	}
+	if unbatched.Rows != targets.BenchRows {
+		t.Fatalf("unbatched update touched %d rows; want %d", unbatched.Rows, targets.BenchRows)
+	}
+	t.Logf("unbatched update: %d rows in %d ms", unbatched.Rows, unbatched.Duration.Milliseconds())
+	if unbatched.Duration <= time.Second {
+		t.Logf("unbatched update took one second or less on this machine, raise targets.BenchRows")
+	}
+
+	const batchSize = 10_000
+	cfg := fmt.Sprintf(`{"table_name":%q,"cursor_col":"id","batch_size":%d}`, table, batchSize)
+	mig := e.migration(e.db, targets.BenchBatchUpSQL(table), targets.BenchBatchDownSQL(table), domain.ModeBatch, cfg)
+	ref := e.enqueue(e.db, mig, domain.ActionApply, domain.ModeBatch, nil, nil)
+	start := time.Now()
+	e.runAll(e.worker())
+	t.Logf("batch migration: %d rows in %d ms", targets.BenchRows, time.Since(start).Milliseconds())
+
+	s := e.expectState(ref, domain.JobSuccess, "completed")
+	wantBatches := targets.BenchRows / batchSize
+	if s.JobBatches != wantBatches || s.TotalBatches != wantBatches || s.JobRows != targets.BenchRows || s.ExecRows != targets.BenchRows {
+		t.Fatalf("state = %+v; want %d batches and %d rows", s, wantBatches, targets.BenchRows)
+	}
+	if n := e.targetInt(`select count(*) from ` + table + ` where amount <> (id % 1000) + 1.5`); n != 0 {
+		t.Fatalf("%d rows were not updated exactly once", n)
+	}
+	if n := e.targetInt(`select count(*) from _leafygo_batch_checkpoints where root_execution_id = $1`, ref.ExecutionID); n != int64(wantBatches) {
+		t.Fatalf("checkpoints = %d; want %d", n, wantBatches)
 	}
 }
