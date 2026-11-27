@@ -190,6 +190,7 @@ export interface MigrationDefinition {
   is_superseded: boolean;
   superseded_by_migration_id?: string | null;
   superseded_by_title?: string | null;
+  superseded_by_seq_version?: number | null;
   created_by_username?: string | null;
   updated_at: string;
   active_proposal?: ProposalSummary | null;
@@ -275,6 +276,7 @@ export interface Execution {
   committed_rows: number;
   is_superseded: boolean;
   superseded_by_title?: string | null;
+  superseded_by_seq_version?: number | null;
 }
 
 export interface Job {

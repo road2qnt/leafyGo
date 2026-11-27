@@ -199,6 +199,9 @@ export function normalizeMigration(raw: Any, all: MigrationDefinition[]): Migrat
     superseded_by_migration_id: supersededByID,
     superseded_by_title:
       raw.superseded_by_title ?? (supersededByID ? byId.get(supersededByID)?.title ?? null : null),
+    superseded_by_seq_version:
+      raw.superseded_by_seq_version ??
+      (supersededByID ? byId.get(supersededByID)?.seq_version ?? null : null),
     active_proposal:
       raw.active_proposal ??
       (latestProposal && activeProposalStates.has(latestProposal.status)
@@ -273,6 +276,9 @@ export function normalizeExecution(raw: Any, migrations: MigrationDefinition[]):
     superseded_by_title:
       raw.superseded_by_title ??
       (raw.superseded_by_migration_id ? byId.get(raw.superseded_by_migration_id)?.title ?? null : null),
+    superseded_by_seq_version:
+      raw.superseded_by_seq_version ??
+      (raw.superseded_by_migration_id ? byId.get(raw.superseded_by_migration_id)?.seq_version ?? null : null),
     duration_ms: raw.duration_ms ?? null,
     executed_sql: raw.executed_sql ?? undefined,
   } as Execution;

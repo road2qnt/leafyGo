@@ -171,9 +171,9 @@ export default function MigrationEditorPage() {
           candidate.id !== migrationId &&
           (candidate.id === form.replacesId ||
             (!candidate.is_active &&
+              !candidate.is_superseded &&
               !candidate.active_proposal &&
               (candidate.is_immutable ||
-                candidate.is_superseded ||
                 candidate.latest_status === "failed"))),
       ),
     [migrationsQuery.data, migrationId, form.replacesId],

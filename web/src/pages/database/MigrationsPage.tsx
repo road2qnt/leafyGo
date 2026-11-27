@@ -219,6 +219,12 @@ export default function MigrationsPage() {
               {definitionsPage.pageItems.map((migration) => {
                 const active = migration.active_proposal;
                 const locked = migration.is_immutable || Boolean(active);
+                const supersededLabel = migration.is_superseded
+                  ? `Superseded by ${migration.superseded_by_seq_version != null ? `#${migration.superseded_by_seq_version}: ` : ""}"${migration.superseded_by_title ?? ""}"`
+                  : null;
+                const replacesLabel = migration.replaces_title
+                  ? `Replaces #${migration.replaces_effective_seq ?? migration.effective_seq}: "${migration.replaces_title}"`
+                  : null;
                 return (
                   <tr key={migration.id}>
                     <th scope="row" data-label="Title" className="td cell-title col-main max-w-[24rem]">
@@ -238,14 +244,20 @@ export default function MigrationsPage() {
                           {migration.is_irreversible ? (
                             <span className="badge badge-warning">Irreversible</span>
                           ) : null}
-                          {migration.is_superseded ? (
-                            <span className="badge badge-warning whitespace-normal">
-                              Superseded by {migration.superseded_by_title}
+                          {supersededLabel ? (
+                            <span
+                              className="badge badge-warning inline-block max-w-[18rem] truncate"
+                              title={supersededLabel}
+                            >
+                              {supersededLabel}
                             </span>
                           ) : null}
-                          {migration.replaces_title ? (
-                            <span className="badge badge-info whitespace-normal">
-                              Replaces #{migration.replaces_effective_seq ?? migration.effective_seq}: &ldquo;{migration.replaces_title}&rdquo;
+                          {replacesLabel ? (
+                            <span
+                              className="badge badge-info inline-block max-w-[18rem] truncate"
+                              title={replacesLabel}
+                            >
+                              {replacesLabel}
                             </span>
                           ) : null}
                           {migration.is_immutable ? (

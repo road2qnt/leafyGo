@@ -364,11 +364,17 @@ export default function HistoryPage() {
                             eff #{execution.effective_seq} · raw #{execution.seq_version} · rev{" "}
                             {execution.migration_revision}
                           </span>
-                          {execution.is_superseded ? (
-                            <span className="badge badge-warning whitespace-normal">
-                              Superseded by {execution.superseded_by_title}
-                            </span>
-                          ) : null}
+                          {execution.is_superseded ? (() => {
+                            const supersededLabel = `Superseded by ${execution.superseded_by_seq_version != null ? `#${execution.superseded_by_seq_version}: ` : ""}"${execution.superseded_by_title ?? ""}"`;
+                            return (
+                              <span
+                                className="badge badge-warning inline-block max-w-[18rem] truncate"
+                                title={supersededLabel}
+                              >
+                                {supersededLabel}
+                              </span>
+                            );
+                          })() : null}
                         </div>
                       </div>
                     </td>

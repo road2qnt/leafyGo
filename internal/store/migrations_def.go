@@ -221,12 +221,13 @@ func (s *Store) ResolveAndValidateSupersedeTx(ctx context.Context, tx pgx.Tx, db
 
 		var effSeq int64
 		var isImmutable bool
+		var isSuperseded bool
 		var parentID pgtype.UUID
 		err := tx.QueryRow(ctx, `
-			select effective_seq, is_immutable, replaces_migration_id
+			select effective_seq, is_immutable, is_superseded, replaces_migration_id
 			from migration_definitions
 			where id = $1 and db_id = $2
-			for update`, currID, dbID).Scan(&effSeq, &isImmutable, &parentID)
+			for update`, currID, dbID).Scan(&effSeq, &isImmutable, &isSuperseded, &parentID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -234,6 +235,9 @@ func (s *Store) ResolveAndValidateSupersedeTx(ctx context.Context, tx pgx.Tx, db
 			return 0, fmt.Errorf("walk supersede chain: %w", err)
 		}
 		if depth == 0 {
+			if isSuperseded {
+				return 0, ErrMigrationNotSupersedable
+			}
 			directTargetImmutable = isImmutable
 		}
 		rootEffectiveSeq = effSeq
