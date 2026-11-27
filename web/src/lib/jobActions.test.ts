@@ -43,6 +43,18 @@ describe("jobActions", () => {
     expect(actions.rollback).toBe(false);
   });
 
+  it("offers nothing for historical hold jobs that no longer hold the lock", () => {
+    for (const status of ["partial", "partially_reverted", "uncertain"] as const) {
+      expect(jobActions(status, null, "apply")).toEqual({
+        retry: false,
+        revert: false,
+        rollback: false,
+        forward: false,
+        resolve: false,
+      });
+    }
+  });
+
   it("offers nothing while running or queued", () => {
     expect(jobActions("running", "running", "apply")).toEqual({
       retry: false,

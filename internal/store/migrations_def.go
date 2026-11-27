@@ -343,9 +343,20 @@ func (s *Store) ResolveAndValidateSupersedeTx(ctx context.Context, tx pgx.Tx, db
 		var hasBlockingExecOrProposal bool
 		if err := tx.QueryRow(ctx, `
 			select exists (
+				select 1 from (
+					select distinct on (root_execution_id) status
+					from migration_executions
+					where migration_id = $1
+					order by root_execution_id, seq_order desc
+				) latest_roots
+				where status in ('queued', 'running', 'partial', 'partially_reverted', 'uncertain')
+				union all
 				select 1 from migration_executions
 				where migration_id = $1
-				  and status in ('queued', 'running', 'partial', 'partially_reverted', 'uncertain')
+				  and status in ('queued', 'running')
+				union all
+				select 1 from database_migration_locks
+				where migration_id = $1
 				union all
 				select 1 from migration_proposals
 				where migration_id = $1

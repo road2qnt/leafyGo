@@ -355,11 +355,11 @@ export default function HistoryPage() {
                       </button>
                     </th>
                     <td data-label="Migration" className="td cell-title col-main col-main-narrow max-w-[24rem]">
-                      <div>
+                      <div className="min-w-0">
                         <span className="font-semibold text-ink">
                           {execution.migration_title_snapshot}
                         </span>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
                           <span className="font-mono text-xs text-muted">
                             eff #{execution.effective_seq} · raw #{execution.seq_version} · rev{" "}
                             {execution.migration_revision}
@@ -367,19 +367,24 @@ export default function HistoryPage() {
                           {execution.is_superseded ? (() => {
                             const supersededLabel = `Superseded by ${execution.superseded_by_seq_version != null ? `#${execution.superseded_by_seq_version}: ` : ""}"${execution.superseded_by_title ?? ""}"`;
                             return (
-                              <span
-                                className="badge badge-warning inline-block max-w-[18rem] truncate"
-                                title={supersededLabel}
-                              >
-                                {supersededLabel}
-                              </span>
+                              <div className="badge-truncate-wrap">
+                                <span
+                                  className="badge badge-warning badge-truncate"
+                                  title={supersededLabel}
+                                >
+                                  {supersededLabel}
+                                </span>
+                              </div>
                             );
                           })() : null}
                         </div>
                       </div>
                     </td>
                     <td data-label="Action" className="td">
-                      <ActionBadge action={execution.action_type} />
+                      <ActionBadge
+                        action={execution.action_type}
+                        className="max-w-[7.5rem] whitespace-normal text-center leading-tight"
+                      />
                     </td>
                     <td data-label="Status" className="td">
                       <StatusBadge status={execution.status} />

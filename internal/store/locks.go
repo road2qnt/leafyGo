@@ -83,9 +83,22 @@ func restoreLockTx(ctx context.Context, tx pgx.Tx, lease Lease) error {
 	err = tx.QueryRow(ctx, `
 		select t.execution_id, t.job_id, t.migration_id
 		from migration_jobs j
+		join migration_executions je on je.execution_id = j.execution_id
 		join migration_proposals p on p.id = j.proposal_id
-		join migration_jobs t on t.execution_id = p.target_execution_id
-		where j.job_id = $1`, lease.JobID).Scan(&targetExecution, &targetJob, &targetMigration)
+		join migration_jobs t on t.job_id <> j.job_id
+		join migration_executions te on te.execution_id = t.execution_id
+		where j.job_id = $1
+		  and (
+		      t.execution_id = p.target_execution_id
+		      or (
+		          te.root_execution_id = je.root_execution_id
+		          and t.status in ('partial', 'partially_reverted', 'uncertain')
+		      )
+		  )
+		order by
+		  case when t.status in ('partial', 'partially_reverted', 'uncertain') then 0 else 1 end,
+		  t.queue_seq desc
+		limit 1`, lease.JobID).Scan(&targetExecution, &targetJob, &targetMigration)
 	if err != nil {
 		return fmt.Errorf("restore lock load target job: %w", err)
 	}

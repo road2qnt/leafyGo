@@ -21,6 +21,7 @@ import {
 import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 import { formatDateTime } from "../../lib/format";
+import { isActiveProposal } from "../../lib/status";
 import { useDatabaseContext } from "./context";
 
 export default function MigrationsPage() {
@@ -79,17 +80,7 @@ export default function MigrationsPage() {
   );
   const proposalsPage = usePagination(visibleProposals, { resetKey: dbId });
 
-  const activeProposals = proposals.filter((proposal) =>
-    [
-      "pending_review",
-      "approved",
-      "queued",
-      "running",
-      "partial",
-      "partially_reverted",
-      "uncertain",
-    ].includes(proposal.status),
-  );
+  const activeProposals = proposals.filter((proposal) => isActiveProposal(proposal.status));
 
   const invalidate = async () => {
     await Promise.all([
@@ -151,7 +142,7 @@ export default function MigrationsPage() {
 
       {activeProposals.length > 0 ? (
         <Callout tone="warning" title={`${activeProposals.length} proposal(s) in the workflow`}>
-          Pending proposals are waiting for leaders; queued/running/hold proposals are visible on
+          Pending proposals are waiting for leaders; queued and running proposals are visible on
           the queue. A migration with an active proposal cannot be edited.
           <div className="mt-2.5 flex flex-wrap gap-2">
             {activeProposals.slice(0, 4).map((proposal) => (
@@ -245,20 +236,24 @@ export default function MigrationsPage() {
                             <span className="badge badge-warning">Irreversible</span>
                           ) : null}
                           {supersededLabel ? (
-                            <span
-                              className="badge badge-warning inline-block max-w-[18rem] truncate"
-                              title={supersededLabel}
-                            >
-                              {supersededLabel}
-                            </span>
+                            <div className="badge-truncate-wrap">
+                              <span
+                                className="badge badge-warning badge-truncate"
+                                title={supersededLabel}
+                              >
+                                {supersededLabel}
+                              </span>
+                            </div>
                           ) : null}
                           {replacesLabel ? (
-                            <span
-                              className="badge badge-info inline-block max-w-[18rem] truncate"
-                              title={replacesLabel}
-                            >
-                              {replacesLabel}
-                            </span>
+                            <div className="badge-truncate-wrap">
+                              <span
+                                className="badge badge-info badge-truncate"
+                                title={replacesLabel}
+                              >
+                                {replacesLabel}
+                              </span>
+                            </div>
                           ) : null}
                           {migration.is_immutable ? (
                             <span className="badge badge-neutral">Immutable</span>

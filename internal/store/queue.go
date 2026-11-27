@@ -111,6 +111,11 @@ func (s *Store) EnqueueMigrationJobTx(ctx context.Context, tx pgx.Tx, in Enqueue
 		if err != nil {
 			return domain.MigrationJob{}, fmt.Errorf("enqueue load inherited scope: %w", err)
 		}
+		if _, err := tx.Exec(ctx, `
+			update migration_executions set total_batches = $2 where execution_id = $1`,
+			in.ExecutionID, scope.totalBatches); err != nil {
+			return domain.MigrationJob{}, fmt.Errorf("enqueue update execution total_batches: %w", err)
+		}
 	}
 
 	jobID := uuid.New()
@@ -155,17 +160,20 @@ type claimCandidate struct {
 	jobID             uuid.UUID
 	dbID              uuid.UUID
 	actionType        string
+	rootExecutionID   uuid.UUID
 	targetExecutionID *uuid.UUID
 }
 
 func (s *Store) claimCandidates(ctx context.Context) ([]claimCandidate, error) {
 	rows, err := s.pool.Query(ctx, `
 		with eligible as (
-			select j.job_id, j.queue_seq, j.db_id, j.action_type, p.target_execution_id, j.next_run_at
+			select j.job_id, j.queue_seq, j.db_id, j.action_type, je.root_execution_id, p.target_execution_id, j.next_run_at
 			from migration_jobs j
+			join migration_executions je on je.execution_id = j.execution_id
 			join db_connections d on d.id = j.db_id
 			join migration_proposals p on p.id = j.proposal_id
 			left join database_migration_locks l on l.db_id = j.db_id
+			left join migration_executions le on le.execution_id = l.execution_id
 			where j.status = 'queued'
 			  and d.deleted_at is null
 			  and (
@@ -173,16 +181,22 @@ func (s *Store) claimCandidates(ctx context.Context) ([]claimCandidate, error) {
 			      or (
 			          l.lock_state in ('partial_hold', 'partially_reverted_hold', 'uncertain_hold')
 			          and j.action_type in ('batch_retry', 'batch_revert', 'resolve_uncertain')
-			          and p.target_execution_id = l.execution_id
+			          and (
+			              p.target_execution_id = l.execution_id
+			              or (
+			                  j.action_type in ('batch_retry', 'batch_revert')
+			                  and je.root_execution_id = le.root_execution_id
+			              )
+			          )
 			      )
 			  )
 		),
 		heads as (
-			select distinct on (db_id) job_id, queue_seq, db_id, action_type, target_execution_id, next_run_at
+			select distinct on (db_id) job_id, queue_seq, db_id, action_type, root_execution_id, target_execution_id, next_run_at
 			from eligible
 			order by db_id, queue_seq asc
 		)
-		select job_id, db_id, action_type, target_execution_id
+		select job_id, db_id, action_type, root_execution_id, target_execution_id
 		from heads
 		where next_run_at <= now()
 		order by queue_seq asc
@@ -195,7 +209,7 @@ func (s *Store) claimCandidates(ctx context.Context) ([]claimCandidate, error) {
 	var out []claimCandidate
 	for rows.Next() {
 		var c claimCandidate
-		if err := rows.Scan(&c.jobID, &c.dbID, &c.actionType, &c.targetExecutionID); err != nil {
+		if err := rows.Scan(&c.jobID, &c.dbID, &c.actionType, &c.rootExecutionID, &c.targetExecutionID); err != nil {
 			return nil, fmt.Errorf("scan claim candidate: %w", err)
 		}
 		out = append(out, c)
@@ -227,7 +241,8 @@ func (s *Store) claimCandidate(ctx context.Context, c claimCandidate, workerID s
 	var epoch int64
 	var previous *string
 	acquired := false
-	if domain.TakesOverHold(c.actionType) && c.targetExecutionID != nil {
+	allowRootMatch := c.actionType == domain.ActionBatchRetry || c.actionType == domain.ActionBatchRevert
+	if domain.TakesOverHold(c.actionType) && (c.targetExecutionID != nil || allowRootMatch) {
 		err = tx.QueryRow(ctx, `
 			update database_migration_locks
 			set previous_lock_state = lock_state,
@@ -240,10 +255,20 @@ func (s *Store) claimCandidate(ctx context.Context, c claimCandidate, workerID s
 			    lease_until  = now() + make_interval(secs => $7),
 			    updated_at   = now()
 			where db_id = $1
-			  and execution_id = $6
 			  and lock_state in ('partial_hold', 'partially_reverted_hold', 'uncertain_hold')
+			  and (
+			      ($6::uuid is not null and execution_id = $6)
+			      or (
+			          $8::boolean
+			          and exists (
+			              select 1 from migration_executions le
+			              where le.execution_id = database_migration_locks.execution_id
+			                and le.root_execution_id = $9
+			          )
+			      )
+			  )
 			returning lock_epoch, previous_lock_state`,
-			dbID, c.jobID, executionID, migrationID, workerID, *c.targetExecutionID, leaseTTL.Seconds()).
+			dbID, c.jobID, executionID, migrationID, workerID, c.targetExecutionID, leaseTTL.Seconds(), allowRootMatch, c.rootExecutionID).
 			Scan(&epoch, &previous)
 		switch {
 		case err == nil:
@@ -396,7 +421,13 @@ func RetryBackoff(retryCount int) time.Duration {
 }
 
 func (s *Store) UpdateJobScope(ctx context.Context, lease Lease, scopeMin, scopeMax *int64, totalBatches int) error {
-	tag, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("update job scope begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
 		update migration_jobs j
 		set scope_min_cursor = $5, scope_max_cursor = $6, total_batches = $7, updated_at = now()
 		where j.job_id = $1
@@ -409,6 +440,14 @@ func (s *Store) UpdateJobScope(ctx context.Context, lease Lease, scopeMin, scope
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrLeaseLost
+	}
+	if _, err := tx.Exec(ctx, `
+		update migration_executions set total_batches = $2 where execution_id = $1`,
+		lease.ExecutionID, totalBatches); err != nil {
+		return fmt.Errorf("update execution total_batches: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("update job scope commit: %w", err)
 	}
 	return nil
 }

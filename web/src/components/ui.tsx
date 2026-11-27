@@ -142,10 +142,16 @@ const actionTone: Record<ActionType, Tone> = {
   resolve_uncertain: "plum",
 };
 
-export function ActionBadge({ action }: { action: ActionType | string | null | undefined }) {
+export function ActionBadge({
+  action,
+  className,
+}: {
+  action: ActionType | string | null | undefined;
+  className?: string;
+}) {
   const label = action ? (ACTION_LABELS[action as ActionType] ?? action) : "—";
   const tone: Tone = action && action in actionTone ? actionTone[action as ActionType] : "neutral";
-  return <span className={cn("badge font-mono", toneBadge[tone])}>{label}</span>;
+  return <span className={cn("badge font-mono", toneBadge[tone], className)}>{label}</span>;
 }
 
 export function LevelBadge({ level }: { level: "view" | "edit" | undefined | null }) {

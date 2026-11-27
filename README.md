@@ -17,8 +17,8 @@ IF3110 Milestone 1: Database Management Platform.
 
 - **SPA responsif** React 19 + TypeScript + Vite + Tailwind CSS v4 + TanStack
   Query + React Router, di-embed ke binary Go dan disajikan di
-  <http://localhost:8080/app/>. UI template M1 tetap di `/` selama JSON API M2
-  belum selesai.
+  <http://localhost:8080/app/> (rute lama `/`, `/login`, `/admin/*`, `/databases/*`
+  otomatis diarahkan ke SPA saat `SPA_ROOT=true`, yang menjadi default di M2).
 - **Structured logging** JSON `log/slog` dengan `trace_id`/`span_id`/
   `correlation_id`, redaksi kredensial, dan kebijakan SQL per sumber
   (`platform`, `target_viewer`, `query_console`, `dry_run`, `migration`).
@@ -75,7 +75,7 @@ make web-build        # hasil ke internal/web/dist, ikut ter-embed ke Go
 | `OTEL_TRACES_CONSOLE` | true di non-production | cetak span JSON ke stdout |
 | `OTEL_TRACES_SAMPLE_RATIO` | `1` | rasio sampling 0–1 |
 | `METRICS_ENABLED` | `true` | endpoint `/metrics` |
-| `SPA_ROOT` | `false` | `true` = `/` redirect ke `/app/` |
+| `SPA_ROOT` | `true` | `true` = rute lama M1 (`/`, `/login`, `/admin/*`, `/databases/*`) redirect ke `/app/` dan tidak lagi merender Go template |
 Jalankan stack observability (setelah `docker compose up -d`):
 
 ```bash

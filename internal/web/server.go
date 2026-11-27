@@ -161,13 +161,26 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	if s.cfg.SPARoot {
-		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-			http.Redirect(w, req, "/app/", http.StatusPermanentRedirect)
-		})
+		redirectToSPA := func(w http.ResponseWriter, req *http.Request) {
+			target := "/app" + req.URL.Path
+			if req.URL.Path == "/" {
+				target = "/app/"
+			}
+			if req.URL.RawQuery != "" {
+				target += "?" + req.URL.RawQuery
+			}
+			http.Redirect(w, req, target, http.StatusPermanentRedirect)
+		}
+		r.Get("/", redirectToSPA)
+		r.Get("/login", redirectToSPA)
+		r.Get("/admin", redirectToSPA)
+		r.Get("/admin/*", redirectToSPA)
+		r.Get("/databases", redirectToSPA)
+		r.Get("/databases/*", redirectToSPA)
+	} else {
+		r.Get("/login", s.handleLoginGet)
+		r.Post("/login", s.handleLoginPost)
 	}
-
-	r.Get("/login", s.handleLoginGet)
-	r.Post("/login", s.handleLoginPost)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/login", s.handleAPIAuthLogin)
@@ -239,69 +252,77 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
-	r.Group(func(r chi.Router) {
-		r.Use(s.authenticate)
-		r.Use(s.csrfProtect)
+	if !s.cfg.SPARoot {
+		r.Group(func(r chi.Router) {
+			r.Use(s.authenticate)
+			r.Use(s.csrfProtect)
 
-		r.Post("/logout", s.handleLogout)
-		if !s.cfg.SPARoot {
+			r.Post("/logout", s.handleLogout)
 			r.Get("/", s.handleDashboard)
-		}
 
-		r.Route("/admin", func(r chi.Router) {
-			r.Use(s.requirePlatformAdmin)
-			r.Get("/users", s.handleAdminUsers)
-			r.Post("/users", s.handleAdminUserCreate)
-			r.Post("/users/{userID}/password", s.handleAdminUserPassword)
-			r.Post("/users/{userID}/active", s.handleAdminUserActive)
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(s.requirePlatformAdmin)
+				r.Get("/users", s.handleAdminUsers)
+				r.Post("/users", s.handleAdminUserCreate)
+				r.Post("/users/{userID}/password", s.handleAdminUserPassword)
+				r.Post("/users/{userID}/active", s.handleAdminUserActive)
 
-			r.Get("/groups", s.handleAdminGroups)
-			r.Get("/groups/new", s.handleAdminGroupNew)
-			r.Post("/groups", s.handleAdminGroupCreate)
-			r.Get("/groups/{groupID}", s.handleAdminGroup)
-			r.Post("/groups/{groupID}", s.handleAdminGroupUpdate)
-			r.Post("/groups/{groupID}/members", s.handleAdminGroupMembers)
-			r.Post("/groups/{groupID}/access", s.handleAdminGroupAccess)
-			r.Post("/groups/{groupID}/delete", s.handleAdminGroupDelete)
+				r.Get("/groups", s.handleAdminGroups)
+				r.Get("/groups/new", s.handleAdminGroupNew)
+				r.Post("/groups", s.handleAdminGroupCreate)
+				r.Get("/groups/{groupID}", s.handleAdminGroup)
+				r.Post("/groups/{groupID}", s.handleAdminGroupUpdate)
+				r.Post("/groups/{groupID}/members", s.handleAdminGroupMembers)
+				r.Post("/groups/{groupID}/access", s.handleAdminGroupAccess)
+				r.Post("/groups/{groupID}/delete", s.handleAdminGroupDelete)
 
-			r.Get("/databases", s.handleAdminDatabases)
-			r.Get("/databases/new", s.handleAdminDatabaseNew)
-			r.Post("/databases", s.handleAdminDatabaseCreate)
-			r.Get("/databases/{dbID}", s.handleAdminDatabase)
-			r.Post("/databases/{dbID}", s.handleAdminDatabaseUpdate)
-			r.Post("/databases/{dbID}/test", s.handleAdminDatabaseTest)
-			r.Post("/databases/{dbID}/delete", s.handleAdminDatabaseDelete)
-		})
-
-		r.Route("/databases/{id}", func(r chi.Router) {
-			r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.handleOverview)
-			r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.handleSchema)
-			r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
-			r.With(s.requireDBAction(access.ActionQueryConsole)).Get("/query", s.handleQueryConsoleGet)
-			r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query", s.handleQueryConsolePost)
-			r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query/explain", s.handleQueryConsoleExplain)
-			r.With(s.requireDBAction(access.ActionManageDrafts), s.queryBodyLimit).Post("/query/to-draft", s.handleQueryToDraft)
-			r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleHistory)
-
-			r.Group(func(r chi.Router) {
-				r.Use(s.requireDBAction(access.ActionManageDrafts))
-				r.Get("/migrations/drafts", s.handleDrafts)
-				r.Get("/migrations/new", s.handleDraftNew)
-				r.Post("/migrations/drafts", s.handleDraftCreate)
-				r.Get("/migrations/drafts/{draftID}", s.handleDraftEditor)
-				r.Post("/migrations/drafts/{draftID}", s.handleDraftSave)
-				r.Post("/migrations/drafts/{draftID}/delete", s.handleDraftDelete)
+				r.Get("/databases", s.handleAdminDatabases)
+				r.Get("/databases/new", s.handleAdminDatabaseNew)
+				r.Post("/databases", s.handleAdminDatabaseCreate)
+				r.Get("/databases/{dbID}", s.handleAdminDatabase)
+				r.Post("/databases/{dbID}", s.handleAdminDatabaseUpdate)
+				r.Post("/databases/{dbID}/test", s.handleAdminDatabaseTest)
+				r.Post("/databases/{dbID}/delete", s.handleAdminDatabaseDelete)
 			})
-			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/explain", s.handleDraftNewExplain)
-			r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/{draftID}/explain", s.handleDraftExplain)
-			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/execute", s.handleDraftNewExecute)
-			r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/{draftID}/execute", s.handleDraftExecute)
+
+			r.Route("/databases/{id}", func(r chi.Router) {
+				r.With(s.requireDBAction(access.ActionViewOverview)).Get("/", s.handleOverview)
+				r.With(s.requireDBAction(access.ActionViewSchema)).Get("/schema", s.handleSchema)
+				r.With(s.requireDBAction(access.ActionViewData)).Get("/data", s.handleData)
+				r.With(s.requireDBAction(access.ActionQueryConsole)).Get("/query", s.handleQueryConsoleGet)
+				r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query", s.handleQueryConsolePost)
+				r.With(s.requireDBAction(access.ActionQueryConsole), s.queryBodyLimit).Post("/query/explain", s.handleQueryConsoleExplain)
+				r.With(s.requireDBAction(access.ActionManageDrafts), s.queryBodyLimit).Post("/query/to-draft", s.handleQueryToDraft)
+				r.With(s.requireDBAction(access.ActionViewHistory)).Get("/migrations", s.handleHistory)
+
+				r.Group(func(r chi.Router) {
+					r.Use(s.requireDBAction(access.ActionManageDrafts))
+					r.Get("/migrations/drafts", s.handleDrafts)
+					r.Get("/migrations/new", s.handleDraftNew)
+					r.Post("/migrations/drafts", s.handleDraftCreate)
+					r.Get("/migrations/drafts/{draftID}", s.handleDraftEditor)
+					r.Post("/migrations/drafts/{draftID}", s.handleDraftSave)
+					r.Post("/migrations/drafts/{draftID}/delete", s.handleDraftDelete)
+				})
+				r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/explain", s.handleDraftNewExplain)
+				r.With(s.requireDBAction(access.ActionExplainMigration)).Post("/migrations/drafts/{draftID}/explain", s.handleDraftExplain)
+				r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/execute", s.handleDraftNewExecute)
+				r.With(s.requireDBAction(access.ActionExecuteMigration)).Post("/migrations/drafts/{draftID}/execute", s.handleDraftExecute)
+			})
 		})
-	})
+	}
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Endpoint not found.")
+			return
+		}
+		if s.cfg.SPARoot {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				http.Redirect(w, r, "/app/", http.StatusFound)
+				return
+			}
+			http.NotFound(w, r)
 			return
 		}
 		s.renderError(w, r, http.StatusNotFound, "Page not found.")
@@ -309,6 +330,10 @@ func (s *Server) Handler() http.Handler {
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			writeAPIError(w, r, http.StatusMethodNotAllowed, ErrCodeValidation, "Request method not allowed.")
+			return
+		}
+		if s.cfg.SPARoot {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		s.renderError(w, r, http.StatusMethodNotAllowed, "Request method not allowed.")

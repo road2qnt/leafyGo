@@ -904,8 +904,23 @@
   justify-content: flex-start;
   gap: 0.5rem;
 }
-.table-wrap[data-stacked] .table-stack :is(.badge, .truncate) {
+.table-wrap[data-stacked] .table-stack :is(.badge, .truncate):not(.badge-truncate) {
   white-space: normal;
+}
+.badge-truncate-wrap {
+  display: block;
+  flex: 1 0 100%;
+  width: 100%;
+  min-width: 0;
+  contain: inline-size;
+}
+.badge-truncate {
+  display: inline-block;
+  max-width: min(100%, 16rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .table-wrap[data-stacked] .table-stack .items-end {
   align-items: flex-start;

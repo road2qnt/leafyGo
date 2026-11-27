@@ -98,27 +98,46 @@ func TestSPACSPAllowsInlineStylesButNotInlineScripts(t *testing.T) {
 	}
 }
 
-func TestSPARootRedirectsDashboard(t *testing.T) {
+func TestSPARootRedirectsAllLegacyM1Routes(t *testing.T) {
 	s := spaTestServer(t)
 	s.cfg.SPARoot = true
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusPermanentRedirect {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	if rec.Header().Get("Location") != "/app/" {
-		t.Fatalf("Location = %q", rec.Header().Get("Location"))
-	}
-}
+	handler := s.Handler()
 
-func TestM1TemplateLoginStillServed(t *testing.T) {
-	s := spaTestServer(t)
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login status = %d", rec.Code)
+	cases := []struct {
+		path     string
+		wantLoc  string
+		wantCode int
+	}{
+		{path: "/", wantLoc: "/app/", wantCode: http.StatusPermanentRedirect},
+		{path: "/login", wantLoc: "/app/login", wantCode: http.StatusPermanentRedirect},
+		{path: "/admin/users", wantLoc: "/app/admin/users", wantCode: http.StatusPermanentRedirect},
+		{path: "/admin/groups", wantLoc: "/app/admin/groups", wantCode: http.StatusPermanentRedirect},
+		{path: "/admin/databases", wantLoc: "/app/admin/databases", wantCode: http.StatusPermanentRedirect},
+		{path: "/databases/db-1/schema?tab=cols", wantLoc: "/app/databases/db-1/schema?tab=cols", wantCode: http.StatusPermanentRedirect},
+		{path: "/unknown-legacy-page", wantLoc: "/app/", wantCode: http.StatusFound},
 	}
-	if !strings.Contains(rec.Body.String(), "Sign in to") {
-		t.Fatalf("M1 login template changed unexpectedly")
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rec.Code != tc.wantCode {
+				t.Fatalf("GET %s status = %d, want %d", tc.path, rec.Code, tc.wantCode)
+			}
+			if got := rec.Header().Get("Location"); got != tc.wantLoc {
+				t.Fatalf("GET %s Location = %q, want %q", tc.path, got, tc.wantLoc)
+			}
+		})
+	}
+
+	// Legacy M1 form POSTs must not be handled when SPA_ROOT=true.
+	for _, path := range []string{"/login", "/logout", "/admin/users"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		if rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusNotFound {
+			t.Fatalf("POST %s status = %d, want 404 or 405", path, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "<html") {
+			t.Fatalf("POST %s rendered HTML template unexpectedly", path)
+		}
 	}
 }

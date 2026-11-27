@@ -20,16 +20,19 @@ export function jobActions(
   lockState: LockState | null | undefined,
   actionType: ActionType,
 ): JobActionAvailability {
-  const reverseOnly = lockState === "partially_reverted_hold" || status === "partially_reverted";
+  const partialHeld = status === "partial" && lockState === "partial_hold";
+  const partiallyRevertedHeld =
+    status === "partially_reverted" && lockState === "partially_reverted_hold";
+  const uncertainHeld = status === "uncertain" && lockState === "uncertain_hold";
   return {
-    retry: status === "partial" && !reverseOnly,
-    revert: status === "partial" || status === "partially_reverted",
+    retry: partialHeld,
+    revert: partialHeld || partiallyRevertedHeld,
     rollback:
       status === "success" &&
       actionType !== "rollback" &&
       actionType !== "batch_revert" &&
       actionType !== "resolve_uncertain",
     forward: status === "success" && actionType === "rollback",
-    resolve: status === "uncertain",
+    resolve: uncertainHeld,
   };
 }

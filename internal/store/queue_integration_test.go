@@ -490,6 +490,39 @@ func TestRequeueOfTakeoverKeepsDatabaseHeld(t *testing.T) {
 	}
 }
 
+func TestBatchRevertTakesOverHoldAfterFailedRetry(t *testing.T) {
+	st := testPool(t)
+	ctx := context.Background()
+	db := createDB(t, st, "orders")
+	mig := newMigration(t, st, db.ID, domain.ModeBatch)
+	apply := newExecution(t, st, db.ID, mig, domain.ActionApply, domain.ModeBatch, nil, nil)
+	enqueue(t, st, apply)
+
+	c1 := claim(t, st, "w1")
+	if err := st.FinishJob(ctx, c1.Lease, store.Outcome{Status: domain.JobPartial, HoldState: domain.LockPartialHold}); err != nil {
+		t.Fatalf("finish apply partial: %v", err)
+	}
+
+	// Retry takes over and fails partial again, moving lock.execution_id to retry.executionID.
+	retry := newExecution(t, st, db.ID, mig, domain.ActionBatchRetry, domain.ModeBatch, &apply.executionID, &apply.executionID)
+	enqueue(t, st, retry)
+	c2 := claim(t, st, "w2")
+	if c2 == nil || c2.Job.ExecutionID != retry.executionID {
+		t.Fatalf("retry claim = %+v; want retry", c2)
+	}
+	if err := st.FinishJob(ctx, c2.Lease, store.Outcome{Status: domain.JobPartial, HoldState: domain.LockPartialHold}); err != nil {
+		t.Fatalf("finish retry partial: %v", err)
+	}
+
+	// Revert targeting the original apply execution (same root_execution_id) must still take over the hold.
+	revert := newExecution(t, st, db.ID, mig, domain.ActionBatchRevert, domain.ModeBatch, &apply.executionID, &apply.executionID)
+	revertJob := enqueue(t, st, revert)
+	c3 := claim(t, st, "w3")
+	if c3 == nil || c3.Job.ID != revertJob.ID || c3.PreviousLockState != domain.LockPartialHold {
+		t.Fatalf("revert claim = %+v; want batch_revert to take over partial_hold via root_execution_id", c3)
+	}
+}
+
 func TestFailBeforeExecuteDeletesFreshLock(t *testing.T) {
 	st := testPool(t)
 	ctx := context.Background()

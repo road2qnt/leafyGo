@@ -117,6 +117,7 @@ func (w *Worker) recoverLock(ctx context.Context, l domain.DBLock, reprobe bool)
 	password, err := w.box.Decrypt(work.DB.PasswordEnc)
 	if err != nil {
 		log.Error("decrypt target password", "error", err)
+		w.holdUncertain(ctx, log, lease, reprobe, err)
 		return
 	}
 	probeConn, err := target.OpenConn(ctx, work.DB, password, "leafygo-recovery-"+l.ExecutionID.String(), w.connectTimeout)
@@ -215,16 +216,17 @@ func (w *Worker) settleNormal(ctx context.Context, log *slog.Logger, lease store
 // Resumes batches from checkpoints in the original direction, without revalidation.
 // Reports whether the run started and took the job slot.
 func (w *Worker) resumeBatches(ctx context.Context, log *slog.Logger, lease store.Lease, work store.JobWork, reprobe bool, password string) bool {
+	cfg, err := parseBatchConfig(work.Migration.BatchConfig)
+	if err != nil {
+		log.Error("parse batch config for recovery", "error", err)
+		w.holdUncertain(ctx, log, lease, reprobe, err)
+		return false
+	}
 	if reprobe {
 		if err := w.st.ResumeFromHold(ctx, lease, w.cfg.LeaseTTL); err != nil {
 			log.Error("resume from uncertain hold", "error", err)
 			return false
 		}
-	}
-	cfg, err := parseBatchConfig(work.Migration.BatchConfig)
-	if err != nil {
-		log.Error("parse batch config for recovery", "error", err)
-		return false
 	}
 	r := &run{w: w, ctx: ctx, log: log, work: work, lease: lease, batch: cfg, startedAt: time.Now()}
 	if err := r.open(password); err != nil {

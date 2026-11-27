@@ -146,6 +146,27 @@ export function isActiveJob(status: JobStatus | null | undefined): boolean {
   return status ? JOB_STATUS_META[status].active : false;
 }
 
+export function isLiveJob(
+  status: JobStatus | null | undefined,
+  lockState: LockState | null | undefined,
+  holdsLock?: boolean,
+): boolean {
+  if (status === "queued" || status === "running") return true;
+  if (status === "partial" || status === "partially_reverted" || status === "uncertain") {
+    return holdsLock ?? Boolean(lockState);
+  }
+  return false;
+}
+
+export function isActiveProposal(status: ProposalStatus | null | undefined): boolean {
+  return (
+    status === "pending_review" ||
+    status === "approved" ||
+    status === "queued" ||
+    status === "running"
+  );
+}
+
 export function isUncertain(status: string | null | undefined): boolean {
   return status === "uncertain";
 }

@@ -157,7 +157,7 @@ func Load() (Config, error) {
 	if cfg.MetricsEnabled, err = boolEnv("METRICS_ENABLED", true); err != nil {
 		return Config{}, err
 	}
-	if cfg.SPARoot, err = boolEnv("SPA_ROOT", false); err != nil {
+	if cfg.SPARoot, err = boolEnv("SPA_ROOT", true); err != nil {
 		return Config{}, err
 	}
 	if cfg.Worker, err = loadWorkerConfig(); err != nil {

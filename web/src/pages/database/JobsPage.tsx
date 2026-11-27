@@ -27,7 +27,7 @@ import {
   formatRelative,
   percent,
 } from "../../lib/format";
-import { isActiveJob } from "../../lib/status";
+import { isLiveJob } from "../../lib/status";
 
 function jobDurationMs(job: Job): number | null {
   if (!job.started_at || !job.finished_at) return null;
@@ -51,7 +51,12 @@ export default function JobsPage() {
     enabled: Boolean(dbId),
     refetchInterval: (query) => {
       const jobs = query.state.data?.jobs ?? [];
-      return jobs.some((job) => isActiveJob(job.status)) ? 3_000 : 10_000;
+      const activeId = query.state.data?.active_job_id ?? null;
+      return jobs.some((job) =>
+        isLiveJob(job.status, job.lock_state, activeId !== null && job.job_id === activeId),
+      )
+        ? 3_000
+        : 10_000;
     },
   });
 
@@ -62,17 +67,26 @@ export default function JobsPage() {
   const queueJobs = useMemo(
     () =>
       jobs
-        .filter((job) => isActiveJob(job.status))
+        .filter((job) =>
+          isLiveJob(job.status, job.lock_state, activeJobId !== null && job.job_id === activeJobId),
+        )
         .sort((a, b) => a.queue_seq - b.queue_seq),
-    [jobs],
+    [jobs, activeJobId],
   );
 
   const historyJobs = useMemo(
     () =>
       jobs
-        .filter((job) => !isActiveJob(job.status))
+        .filter(
+          (job) =>
+            !isLiveJob(
+              job.status,
+              job.lock_state,
+              activeJobId !== null && job.job_id === activeJobId,
+            ),
+        )
         .sort((a, b) => b.queue_seq - a.queue_seq),
-    [jobs],
+    [jobs, activeJobId],
   );
 
   const filteredHistory = useMemo(() => {
@@ -237,6 +251,9 @@ export default function JobsPage() {
               <option value="all">All statuses</option>
               <option value="success">Success</option>
               <option value="failed">Failed</option>
+              <option value="partial">Partial</option>
+              <option value="partially_reverted">Partially reverted</option>
+              <option value="uncertain">Uncertain</option>
             </Select>
           </div>
           <span className="text-sm text-muted">

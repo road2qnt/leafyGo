@@ -52,10 +52,10 @@ export default function ProposalReviewPage() {
     queryFn: () => migrationApi.proposal(dbId, proposalId),
     refetchInterval: (query) => {
       const status = query.state.data?.proposal.status;
-      return status &&
-        ["queued", "running", "partial", "partially_reverted", "uncertain"].includes(status)
-        ? 4_000
-        : false;
+      if (!status) return false;
+      if (status === "queued" || status === "running") return 4_000;
+      if (status === "uncertain" && overview.lock_state === "uncertain_hold") return 4_000;
+      return false;
     },
   });
 
@@ -177,6 +177,15 @@ export default function ProposalReviewPage() {
   const summary = proposal.approval_summary;
   const reviewOpen = proposal.status === "pending_review";
   const activeJobId = proposal.job_id ?? queuedJobID;
+  const activeLockJobId = overview.active_job_id ?? overview.active_job?.job_id ?? null;
+  const holdsDatabaseLock =
+    (proposal.status === "partial" ||
+      proposal.status === "partially_reverted" ||
+      proposal.status === "uncertain") &&
+    Boolean(overview.lock_state) &&
+    overview.lock_state !== "running" &&
+    Boolean(activeJobId) &&
+    activeLockJobId === activeJobId;
 
   return (
     <div className="space-y-6">
@@ -261,9 +270,7 @@ export default function ProposalReviewPage() {
         </Callout>
       ) : null}
 
-      {proposal.status === "partial" ||
-        proposal.status === "partially_reverted" ||
-        proposal.status === "uncertain" ? (
+      {holdsDatabaseLock ? (
         <Callout tone="warning" title="Database is held by a non-terminal execution">
           A new migration on this database must wait. Retry/revert from the job monitor, or let the
           automatic evidence re-probe resolve uncertain commits.

@@ -114,14 +114,14 @@ func (s *Store) checkConflictingDirectionProposalTx(ctx context.Context, tx pgx.
 				join migration_definitions d on d.id = p.migration_id
 				where p.db_id = $1
 				  and p.status in ('pending_review', 'approved', 'queued', 'running')
-				  and p.action_type = 'rollback'
+				  and p.action_type in ('rollback', 'batch_revert')
 				  and d.effective_seq <= $2
 			)`, dbID, effectiveSeq).Scan(&conflict)
 		if err != nil {
 			return fmt.Errorf("check conflicting rollback proposal: %w", err)
 		}
 		if conflict {
-			return fmt.Errorf("%w: an active rollback proposal exists for an earlier or same migration; finish or withdraw it first", ErrConflict)
+			return fmt.Errorf("%w: an active rollback or batch revert proposal exists for an earlier or same migration; finish or withdraw it first", ErrConflict)
 		}
 	case domain.ActionRollback:
 		err = tx.QueryRow(ctx, `
@@ -131,7 +131,7 @@ func (s *Store) checkConflictingDirectionProposalTx(ctx context.Context, tx pgx.
 				join migration_definitions d on d.id = p.migration_id
 				where p.db_id = $1
 				  and p.status in ('pending_review', 'approved', 'queued', 'running')
-				  and p.action_type in ('apply', 'forward')
+				  and p.action_type in ('apply', 'forward', 'batch_retry')
 				  and d.effective_seq >= $2
 			)`, dbID, effectiveSeq).Scan(&conflict)
 		if err != nil {
@@ -777,9 +777,9 @@ func (s *Store) checkPredecessorApprovalGateTx(ctx context.Context, tx pgx.Tx, d
 			return nil, fmt.Errorf("scan active job for predecessor gate: %w", err)
 		}
 		switch act {
-		case domain.ActionApply, domain.ActionForward:
+		case domain.ActionApply, domain.ActionForward, domain.ActionBatchRetry:
 			inFlightApplyForwardBySeq[effSeq] = true
-		case domain.ActionRollback:
+		case domain.ActionRollback, domain.ActionBatchRevert:
 			inFlightRollbackBySeq[effSeq] = true
 		}
 	}

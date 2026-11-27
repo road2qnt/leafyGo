@@ -42,7 +42,7 @@ import {
   truncateMiddle,
 } from "../../lib/format";
 import { jobActions } from "../../lib/jobActions";
-import { actionLabel, isActiveJob, JOB_STATUS_META } from "../../lib/status";
+import { actionLabel, isLiveJob, JOB_STATUS_META } from "../../lib/status";
 import { useDatabaseContext } from "./context";
 import { ResolveUncertainModal } from "./ResolveUncertainModal";
 
@@ -75,8 +75,8 @@ export default function JobMonitorPage() {
     queryKey: ["database", dbId, "job", jobId],
     queryFn: () => jobApi.detail(dbId, jobId),
     refetchInterval: (query) => {
-      const status = query.state.data?.job.status;
-      return status && isActiveJob(status) ? 1_500 : false;
+      const data = query.state.data;
+      return data && isLiveJob(data.job.status, data.lock_state) ? 1_500 : false;
     },
   });
 
@@ -86,13 +86,17 @@ export default function JobMonitorPage() {
   const [proposing, setProposing] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
 
-  const terminalStatus = useRef<string | null>(null);
+  const settledKey = useRef<string | null>(null);
 
   useEffect(() => {
     const status = detailQuery.data?.job.status;
     if (!status) return;
-    if (["success", "failed"].includes(status) && terminalStatus.current !== status) {
-      terminalStatus.current = status;
+    const key = `${jobId}:${status}`;
+    if (
+      ["success", "failed", "partial", "partially_reverted", "uncertain"].includes(status) &&
+      settledKey.current !== key
+    ) {
+      settledKey.current = key;
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "overview"] });
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "history"] });
@@ -100,7 +104,7 @@ export default function JobMonitorPage() {
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "proposals"] });
       void queryClient.invalidateQueries({ queryKey: ["databases"] });
     }
-  }, [detailQuery.data?.job.status, dbId, queryClient]);
+  }, [detailQuery.data?.job.status, dbId, jobId, queryClient]);
 
   const attemptsPage = usePagination(detailQuery.data?.attempts ?? [], { resetKey: jobId });
 
@@ -165,7 +169,7 @@ export default function JobMonitorPage() {
           </ol>
         </nav>
 
-        {isActiveJob(job.status) ? (
+        {isLiveJob(job.status, lock_state) ? (
           <span className="badge badge-info">Live polling 1.5s</span>
         ) : null}
       </div>

@@ -60,8 +60,8 @@ func TestLoadTelemetryDefaults(t *testing.T) {
 	if !cfg.MetricsEnabled {
 		t.Fatal("metrics should default to enabled")
 	}
-	if cfg.SPARoot {
-		t.Fatal("SPA_ROOT should default to false until the JSON API lands")
+	if !cfg.SPARoot {
+		t.Fatal("SPA_ROOT should default to true in Milestone 2")
 	}
 }
 
@@ -72,7 +72,7 @@ func TestLoadTelemetryOverrides(t *testing.T) {
 	withEnv(t, "OTEL_TRACES_CONSOLE", "false")
 	withEnv(t, "OTEL_TRACES_SAMPLE_RATIO", "0.25")
 	withEnv(t, "METRICS_ENABLED", "false")
-	withEnv(t, "SPA_ROOT", "true")
+	withEnv(t, "SPA_ROOT", "false")
 
 	cfg, err := Load()
 	if err != nil {
@@ -90,7 +90,7 @@ func TestLoadTelemetryOverrides(t *testing.T) {
 	if cfg.MetricsEnabled {
 		t.Fatal("metrics should be disabled")
 	}
-	if !cfg.SPARoot {
+	if cfg.SPARoot {
 		t.Fatal("SPA_ROOT override not applied")
 	}
 }
