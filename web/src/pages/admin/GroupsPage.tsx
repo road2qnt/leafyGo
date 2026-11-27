@@ -14,19 +14,22 @@ import {
   OptionalTag,
   PageHeader,
   PageLoader,
+  Pagination,
   Select,
   TableWrap,
   Textarea,
   TextInput,
 } from "../../components/ui";
+import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 
 function GroupsListView() {
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.groups });
 
-  if (groupsQuery.isLoading) return <PageLoader label="Loading groups" />;
-
   const groups = groupsQuery.data?.groups ?? [];
+  const groupsPage = usePagination(groups);
+
+  if (groupsQuery.isLoading) return <PageLoader label="Loading groups" />;
 
   return (
     <div className="space-y-6">
@@ -47,101 +50,104 @@ function GroupsListView() {
 
       <section aria-labelledby="groups-caption">
         {groups.length > 0 ? (
-          <TableWrap>
-            <table className="table-base table-stack">
-              <caption id="groups-caption">
-                {groups.length} {groups.length === 1 ? "group" : "groups"}
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col" className="th">Group</th>
-                  <th scope="col" className="th">Leader</th>
-                  <th scope="col" className="th">Members</th>
-                  <th scope="col" className="th">Database access</th>
-                  <th scope="col" className="th text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map((group) => {
-                  const editDbs = group.access.filter((g) => g.level === "edit");
-                  const viewDbs = group.access.filter((g) => g.level === "view");
-                  return (
-                    <tr key={group.id}>
-                      <th scope="row" data-label="Group" className="td cell-title col-main">
-                        <div>
+          <div>
+            <TableWrap>
+              <table className="table-base table-stack">
+                <caption id="groups-caption">
+                  {groups.length} {groups.length === 1 ? "group" : "groups"}
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="th">Group</th>
+                    <th scope="col" className="th">Leader</th>
+                    <th scope="col" className="th">Members</th>
+                    <th scope="col" className="th">Database access</th>
+                    <th scope="col" className="th text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupsPage.pageItems.map((group) => {
+                    const editDbs = group.access.filter((g) => g.level === "edit");
+                    const viewDbs = group.access.filter((g) => g.level === "view");
+                    return (
+                      <tr key={group.id}>
+                        <th scope="row" data-label="Group" className="td cell-title col-main">
+                          <div>
+                            <Link
+                              to={`/admin/groups/${group.id}`}
+                              className="font-semibold text-leaf-800 hover:text-leaf-900"
+                            >
+                              {group.name}
+                            </Link>
+                            {group.description ? (
+                              <span className="mt-1 block text-xs font-normal text-muted">
+                                {group.description}
+                              </span>
+                            ) : null}
+                          </div>
+                        </th>
+                        <td data-label="Leader" className="td">
+                          {group.leader_username ? (
+                            <span className="badge badge-success">{group.leader_username}</span>
+                          ) : (
+                            <span className="badge badge-danger">No leader</span>
+                          )}
+                        </td>
+                        <td
+                          data-label="Members"
+                          className="td cell-wide max-w-64 truncate"
+                          title={group.members.map((m) => m.username).join(", ")}
+                        >
+                          {group.members.length > 0 ? (
+                            group.members.map((m) => m.username).join(", ")
+                          ) : (
+                            <span className="text-muted">None</span>
+                          )}
+                        </td>
+                        <td data-label="Database access" className="td cell-wide">
+                          {group.access.length > 0 ? (
+                            <dl className="m-0 space-y-1.5">
+                              {editDbs.length > 0 ? (
+                                <div>
+                                  <dt className="text-xs font-semibold tracking-wider text-muted uppercase">
+                                    View + Edit
+                                  </dt>
+                                  <dd className="m-0 text-sm text-ink">
+                                    {editDbs.map((g) => g.db_name).join(", ")}
+                                  </dd>
+                                </div>
+                              ) : null}
+                              {viewDbs.length > 0 ? (
+                                <div>
+                                  <dt className="text-xs font-semibold tracking-wider text-muted uppercase">
+                                    View Only
+                                  </dt>
+                                  <dd className="m-0 text-sm text-ink">
+                                    {viewDbs.map((g) => g.db_name).join(", ")}
+                                  </dd>
+                                </div>
+                              ) : null}
+                            </dl>
+                          ) : (
+                            <span className="text-muted">None</span>
+                          )}
+                        </td>
+                        <td data-label="Actions" className="td cell-actions text-right whitespace-nowrap">
                           <Link
                             to={`/admin/groups/${group.id}`}
-                            className="font-semibold text-leaf-800 hover:text-leaf-900"
+                            className="btn btn-sm"
                           >
-                            {group.name}
+                            Manage<span className="sr-only"> {group.name}</span>
                           </Link>
-                          {group.description ? (
-                            <span className="mt-1 block text-xs font-normal text-muted">
-                              {group.description}
-                            </span>
-                          ) : null}
-                        </div>
-                      </th>
-                      <td data-label="Leader" className="td">
-                        {group.leader_username ? (
-                          <span className="badge badge-success">{group.leader_username}</span>
-                        ) : (
-                          <span className="badge badge-danger">No leader</span>
-                        )}
-                      </td>
-                      <td
-                        data-label="Members"
-                        className="td cell-wide max-w-64 truncate"
-                        title={group.members.map((m) => m.username).join(", ")}
-                      >
-                        {group.members.length > 0 ? (
-                          group.members.map((m) => m.username).join(", ")
-                        ) : (
-                          <span className="text-muted">None</span>
-                        )}
-                      </td>
-                      <td data-label="Database access" className="td cell-wide">
-                        {group.access.length > 0 ? (
-                          <dl className="m-0 space-y-1.5">
-                            {editDbs.length > 0 ? (
-                              <div>
-                                <dt className="text-xs font-semibold tracking-wider text-muted uppercase">
-                                  View + Edit
-                                </dt>
-                                <dd className="m-0 text-sm text-ink">
-                                  {editDbs.map((g) => g.db_name).join(", ")}
-                                </dd>
-                              </div>
-                            ) : null}
-                            {viewDbs.length > 0 ? (
-                              <div>
-                                <dt className="text-xs font-semibold tracking-wider text-muted uppercase">
-                                  View Only
-                                </dt>
-                                <dd className="m-0 text-sm text-ink">
-                                  {viewDbs.map((g) => g.db_name).join(", ")}
-                                </dd>
-                              </div>
-                            ) : null}
-                          </dl>
-                        ) : (
-                          <span className="text-muted">None</span>
-                        )}
-                      </td>
-                      <td data-label="Actions" className="td cell-actions text-right whitespace-nowrap">
-                        <Link
-                          to={`/admin/groups/${group.id}`}
-                          className="btn btn-sm"
-                        >
-                          Manage<span className="sr-only"> {group.name}</span>
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+            <Pagination label="Groups" {...groupsPage.controls} />
+          </div>
         ) : (
           <EmptyState
             title="No groups yet"
@@ -367,6 +373,15 @@ function GroupEditView({ groupId }: { groupId: string }) {
     ]);
   };
 
+  const filteredMembers = (group?.members ?? []).filter((m) =>
+    m.username.toLowerCase().includes(memberFilter.trim().toLowerCase()),
+  );
+  const membersPage = usePagination(filteredMembers, {
+    defaultSize: 5,
+    resetKey: `${groupId}|${memberFilter}`,
+  });
+  const accessPage = usePagination(group?.access ?? [], { defaultSize: 5, resetKey: groupId });
+
   if (groupsQuery.isLoading || usersQuery.isLoading || databasesQuery.isLoading) {
     return <PageLoader label="Loading group" />;
   }
@@ -392,10 +407,6 @@ function GroupEditView({ groupId }: { groupId: string }) {
   const availableUsersToAdd = users.filter(
     (u) => !u.is_platform_admin && u.is_active && !memberIdSet.has(u.id),
   );
-  const filteredMembers = group.members.filter((m) =>
-    m.username.toLowerCase().includes(memberFilter.trim().toLowerCase()),
-  );
-
   const grantedDbIdSet = new Set(group.access.map((a) => a.db_id));
   const availableDatabasesToGrant = databases.filter((db) => !grantedDbIdSet.has(db.id));
 
@@ -652,56 +663,63 @@ function GroupEditView({ groupId }: { groupId: string }) {
                 </div>
               </div>
 
-              <TableWrap>
-                <table className="table-base">
-                  <thead>
-                    <tr>
-                      <th scope="col" className="th">Username</th>
-                      <th scope="col" className="th text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredMembers.map((member) => {
-                      const isLeader = member.id === group.leader_id;
-                      return (
-                        <tr key={member.id}>
-                          <th scope="row" className="td break-all">
-                            <span className="font-semibold text-ink">{member.username}</span>
-                            {isLeader ? (
-                              <span className="badge badge-success ml-2">Leader</span>
-                            ) : null}
-                          </th>
-                          <td className="td w-[1%] text-right whitespace-nowrap">
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              type="button"
-                              disabled={isLeader}
-                              loading={busyMemberId === member.id}
-                              title={
-                                isLeader
-                                  ? "Assign a different leader in Details before removing this member"
-                                  : undefined
-                              }
-                              aria-label={`Remove ${member.username} from ${group.name}`}
-                              onClick={() => void handleRemoveMember(member.id, member.username)}
-                            >
-                              Remove
-                            </Button>
+              <div>
+                <TableWrap>
+                  <table className="table-base">
+                    <thead>
+                      <tr>
+                        <th scope="col" className="th">Username</th>
+                        <th scope="col" className="th text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {membersPage.pageItems.map((member) => {
+                        const isLeader = member.id === group.leader_id;
+                        return (
+                          <tr key={member.id}>
+                            <th scope="row" className="td break-all">
+                              <span className="font-semibold text-ink">{member.username}</span>
+                              {isLeader ? (
+                                <span className="badge badge-success ml-2">Leader</span>
+                              ) : null}
+                            </th>
+                            <td className="td w-[1%] text-right whitespace-nowrap">
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                type="button"
+                                disabled={isLeader}
+                                loading={busyMemberId === member.id}
+                                title={
+                                  isLeader
+                                    ? "Assign a different leader in Details before removing this member"
+                                    : undefined
+                                }
+                                aria-label={`Remove ${member.username} from ${group.name}`}
+                                onClick={() => void handleRemoveMember(member.id, member.username)}
+                              >
+                                Remove
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filteredMembers.length === 0 ? (
+                        <tr>
+                          <td colSpan={2} className="td text-center text-muted">
+                            No matching members.
                           </td>
                         </tr>
-                      );
-                    })}
-                    {filteredMembers.length === 0 ? (
-                      <tr>
-                        <td colSpan={2} className="td text-center text-muted">
-                          No matching members.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </TableWrap>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </TableWrap>
+                <Pagination
+                  label="Members"
+                  {...membersPage.controls}
+                  filteredFrom={group.members.length}
+                />
+              </div>
             </>
           ) : (
             <p className="m-0 text-sm text-muted">No members yet.</p>
@@ -754,70 +772,73 @@ function GroupEditView({ groupId }: { groupId: string }) {
         {accessError ? <ErrorBanner error={accessError} /> : null}
 
         {group.access.length > 0 ? (
-          <TableWrap>
-            <table className="table-base table-stack">
-              <thead>
-                <tr>
-                  <th scope="col" className="th">Database</th>
-                  <th scope="col" className="th w-[1%] whitespace-nowrap">Level</th>
-                  <th scope="col" className="th w-[1%] text-right whitespace-nowrap">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {group.access.map((grant) => {
-                  const draftLevel = accessDrafts[grant.db_id] ?? grant.level;
-                  return (
-                    <tr key={grant.db_id}>
-                      <th scope="row" data-label="Database" className="td cell-title font-semibold text-ink">
-                        {grant.db_name}
-                      </th>
-                      <td data-label="Level" className="td cell-wide w-[1%] whitespace-nowrap">
-                        <div className="inline-flex items-center gap-2">
-                          <label className="sr-only" htmlFor={`lvl-${grant.db_id}`}>
-                            Access level on {grant.db_name}
-                          </label>
-                          <Select
-                            id={`lvl-${grant.db_id}`}
-                            value={draftLevel}
-                            onChange={(event) =>
-                              setAccessDrafts((current) => ({
-                                ...current,
-                                [grant.db_id]: event.target.value as "view" | "edit",
-                              }))
-                            }
-                            className="min-h-[2.25rem] w-auto py-1 pr-9 pl-2.5 text-sm"
-                          >
-                            <option value="view">View Only</option>
-                            <option value="edit">View + Edit</option>
-                          </Select>
+          <div>
+            <TableWrap>
+              <table className="table-base table-stack">
+                <thead>
+                  <tr>
+                    <th scope="col" className="th">Database</th>
+                    <th scope="col" className="th w-[1%] whitespace-nowrap">Level</th>
+                    <th scope="col" className="th w-[1%] text-right whitespace-nowrap">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accessPage.pageItems.map((grant) => {
+                    const draftLevel = accessDrafts[grant.db_id] ?? grant.level;
+                    return (
+                      <tr key={grant.db_id}>
+                        <th scope="row" data-label="Database" className="td cell-title font-semibold text-ink">
+                          {grant.db_name}
+                        </th>
+                        <td data-label="Level" className="td cell-wide w-[1%] whitespace-nowrap">
+                          <div className="inline-flex items-center gap-2">
+                            <label className="sr-only" htmlFor={`lvl-${grant.db_id}`}>
+                              Access level on {grant.db_name}
+                            </label>
+                            <Select
+                              id={`lvl-${grant.db_id}`}
+                              value={draftLevel}
+                              onChange={(event) =>
+                                setAccessDrafts((current) => ({
+                                  ...current,
+                                  [grant.db_id]: event.target.value as "view" | "edit",
+                                }))
+                              }
+                              className="min-h-[2.25rem] w-auto py-1 pr-9 pl-2.5 text-sm"
+                            >
+                              <option value="view">View Only</option>
+                              <option value="edit">View + Edit</option>
+                            </Select>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              type="button"
+                              loading={busyAccessDbId === grant.db_id}
+                              onClick={() => void handleUpdateAccess(grant.db_id, grant.db_name)}
+                            >
+                              Save<span className="sr-only"> level on {grant.db_name}</span>
+                            </Button>
+                          </div>
+                        </td>
+                        <td data-label="Actions" className="td cell-actions w-[1%] text-right whitespace-nowrap">
                           <Button
-                            variant="secondary"
+                            variant="danger"
                             size="sm"
                             type="button"
                             loading={busyAccessDbId === grant.db_id}
-                            onClick={() => void handleUpdateAccess(grant.db_id, grant.db_name)}
+                            onClick={() => void handleRevokeAccess(grant.db_id, grant.db_name)}
                           >
-                            Save<span className="sr-only"> level on {grant.db_name}</span>
+                            Revoke<span className="sr-only"> access on {grant.db_name}</span>
                           </Button>
-                        </div>
-                      </td>
-                      <td data-label="Actions" className="td cell-actions w-[1%] text-right whitespace-nowrap">
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          type="button"
-                          loading={busyAccessDbId === grant.db_id}
-                          onClick={() => void handleRevokeAccess(grant.db_id, grant.db_name)}
-                        >
-                          Revoke<span className="sr-only"> access on {grant.db_name}</span>
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+            <Pagination label="Database access" {...accessPage.controls} />
+          </div>
         ) : (
           <p className="m-0 text-sm text-muted">No database access yet.</p>
         )}

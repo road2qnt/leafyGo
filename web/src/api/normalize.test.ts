@@ -50,6 +50,16 @@ describe("real API normalizers", () => {
     expect(page.total_pages).toBe(5);
   });
 
+  it("paginates by has_next when the table has no row count", () => {
+    const page = normalizeData({
+      page: 3, page_size: 10, has_next: true, row_count: null,
+      columns: [{ name: "id", numeric: true }],
+      rows: [[{ text: "21", is_null: false }]],
+    });
+    expect(page.total_rows).toBeNull();
+    expect(page.total_pages).toBe(4);
+  });
+
   it("maps queryconsole Result cells and duration", () => {
     const result = normalizeQuery({
       columns: ["count"],

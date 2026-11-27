@@ -1,24 +1,24 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Plus, RefreshCcw, Send } from "lucide-react";
+import { ArrowRight, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { migrationApi } from "../../api/endpoints";
-import type { MigrationDefinition } from "../../api/types";
+import type { MigrationDefinition, Proposal } from "../../api/types";
 import {
   ActionBadge,
   Button,
   Callout,
+  ConfirmDialog,
   ErrorBanner,
-  Field,
-  Modal,
   PageLoader,
+  Pagination,
   SearchInput,
   SectionHeader,
   StatusBadge,
   TableEmpty,
   TableWrap,
-  Textarea,
 } from "../../components/ui";
+import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 import { dryRunMeta } from "../../lib/dryRun";
 import { formatDateTime } from "../../lib/format";
@@ -41,15 +41,16 @@ export default function MigrationsPage() {
   });
 
   const [filter, setFilter] = useState("");
-  const [submitTarget, setSubmitTarget] = useState<MigrationDefinition | null>(null);
-  const [submitComment, setSubmitComment] = useState("");
-  const [submitError, setSubmitError] = useState<unknown>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [deleteDefTarget, setDeleteDefTarget] = useState<MigrationDefinition | null>(null);
+  const [deletePropTarget, setDeletePropTarget] = useState<Proposal | null>(null);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setFilter("");
-    setSubmitTarget(null);
-    setSubmitError(null);
+    setDeleteDefTarget(null);
+    setDeletePropTarget(null);
+    setDeleteError(null);
   }, [dbId]);
 
   const canEdit = overview.level === "edit";
@@ -67,6 +68,17 @@ export default function MigrationsPage() {
         .sort((a, b) => a.effective_seq - b.effective_seq || a.seq_version - b.seq_version),
     [migrations, filter],
   );
+
+  const definitionsPage = usePagination(filteredMigrations, { resetKey: `${dbId}|${filter}` });
+
+  const visibleProposals = useMemo(
+    () =>
+      proposals.filter(
+        (proposal) => proposal.status !== "withdrawn" && proposal.status !== "draft",
+      ),
+    [proposals],
+  );
+  const proposalsPage = usePagination(visibleProposals, { resetKey: dbId });
 
   const activeProposals = proposals.filter((proposal) =>
     [
@@ -88,25 +100,35 @@ export default function MigrationsPage() {
     ]);
   };
 
-  const submitProposal = async () => {
-    if (!submitTarget) return;
-    setSubmitting(true);
-    setSubmitError(null);
+  const deleteDefinition = async () => {
+    if (!deleteDefTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      const proposal = await migrationApi.createProposal(dbId, {
-        migration_id: submitTarget.id,
-        action_type: "apply",
-        reason: submitComment,
-      });
-      toast.success("Proposal submitted", "Every required group leader must approve it.");
-      setSubmitTarget(null);
-      setSubmitComment("");
+      await migrationApi.delete(dbId, deleteDefTarget.id);
+      toast.success("Draft deleted", `"${deleteDefTarget.title}" was removed.`);
+      setDeleteDefTarget(null);
       await invalidate();
-      navigate(`/databases/${dbId}/proposals/${proposal.id}`);
     } catch (error) {
-      setSubmitError(error);
+      setDeleteError(error);
     } finally {
-      setSubmitting(false);
+      setDeleting(false);
+    }
+  };
+
+  const deleteProposal = async () => {
+    if (!deletePropTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await migrationApi.deleteProposal(dbId, deletePropTarget.id);
+      toast.success("Proposal deleted", `Proposal for "${deletePropTarget.migration_title}" was removed.`);
+      setDeletePropTarget(null);
+      await invalidate();
+    } catch (error) {
+      setDeleteError(error);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -195,7 +217,7 @@ export default function MigrationsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredMigrations.map((migration) => {
+              {definitionsPage.pageItems.map((migration) => {
                 const active = migration.active_proposal;
                 const locked = migration.is_immutable || Boolean(active);
                 return (
@@ -283,25 +305,18 @@ export default function MigrationsPage() {
                         >
                           {locked ? "View" : "Edit"}
                         </Button>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          disabled={!canEdit || Boolean(active) || migration.is_superseded}
-                          title={
-                            active
-                              ? "An active proposal already locks this definition"
-                              : migration.is_superseded
-                                ? "Superseded definitions cannot be submitted"
-                                : "Submit for multi-group leader approval"
-                          }
-                          onClick={() => {
-                            setSubmitTarget(migration);
-                            setSubmitComment("");
-                            setSubmitError(null);
-                          }}
-                        >
-                          <Send className="h-3.5 w-3.5" /> Submit
-                        </Button>
+                        {canEdit && !locked && !migration.is_superseded ? (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => {
+                              setDeleteDefTarget(migration);
+                              setDeleteError(null);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </Button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -315,6 +330,13 @@ export default function MigrationsPage() {
             </tbody>
           </table>
         </TableWrap>
+        {migrations.length > 0 ? (
+          <Pagination
+            label="Definitions"
+            {...definitionsPage.controls}
+            filteredFrom={migrations.length}
+          />
+        ) : null}
       </section>
 
       <section aria-labelledby="proposals-caption">
@@ -330,7 +352,8 @@ export default function MigrationsPage() {
         <TableWrap>
           <table className="table-base table-stack table-compact">
             <caption id="proposals-caption">
-              {proposals.length} {proposals.length === 1 ? "proposal" : "proposals"}
+              {visibleProposals.length}{" "}
+              {visibleProposals.length === 1 ? "proposal" : "proposals"}
             </caption>
             <thead>
               <tr>
@@ -341,11 +364,11 @@ export default function MigrationsPage() {
                 <th scope="col" className="th">Dry-run</th>
                 <th scope="col" className="th">Proposed by</th>
                 <th scope="col" className="th">Updated</th>
-                <th scope="col" className="th text-right">Review</th>
+                <th scope="col" className="th text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {proposals.map((proposal) => (
+              {proposalsPage.pageItems.map((proposal) => (
                 <tr key={proposal.id}>
                   <th scope="row" data-label="Migration" className="td cell-title col-main max-w-[22rem]">
                     <div>
@@ -397,66 +420,97 @@ export default function MigrationsPage() {
                   <td data-label="Updated" className="td col-date text-muted">
                     {formatDateTime(proposal.updated_at)}
                   </td>
-                  <td data-label="Review" className="td cell-actions text-right whitespace-nowrap">
-                    <Link
-                      to={`/databases/${dbId}/proposals/${proposal.id}`}
-                      className="btn btn-sm"
-                    >
-                      Review <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
+                  <td data-label="Actions" className="td cell-actions text-right whitespace-nowrap">
+                    <div className="inline-flex justify-end gap-2">
+                      {proposal.status === "pending_review" ? (
+                        <Link
+                          to={`/databases/${dbId}/proposals/${proposal.id}`}
+                          className="btn btn-sm"
+                        >
+                          Review <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
+                      ) : (
+                        <Link
+                          to={`/databases/${dbId}/proposals/${proposal.id}`}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          View
+                        </Link>
+                      )}
+                      {canEdit &&
+                      (proposal.status === "rejected" ||
+                        proposal.status === "withdrawn" ||
+                        proposal.status === "draft") ? (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            setDeletePropTarget(proposal);
+                            setDeleteError(null);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Delete
+                        </Button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
-              {proposals.length === 0 ? (
+              {visibleProposals.length === 0 ? (
                 <TableEmpty colSpan={8}>No proposals yet.</TableEmpty>
               ) : null}
             </tbody>
           </table>
         </TableWrap>
+        {visibleProposals.length > 0 ? (
+          <Pagination label="Proposals" {...proposalsPage.controls} />
+        ) : null}
       </section>
 
-      <Modal
-        open={submitTarget !== null}
-        onClose={() => setSubmitTarget(null)}
-        title={`Submit for review · ${submitTarget?.title ?? ""}`}
-        description="The approver snapshot is frozen at submission. Every required group leader must approve before the job is queued."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setSubmitTarget(null)} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button onClick={() => void submitProposal()} loading={submitting}>
-              <Send className="h-4 w-4" /> Submit proposal
-            </Button>
-          </>
+      <ConfirmDialog
+        open={deleteDefTarget !== null}
+        onClose={() => {
+          setDeleteDefTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => void deleteDefinition()}
+        title="Delete migration draft?"
+        description={
+          <div className="space-y-2">
+            <p className="m-0">
+              Permanently delete <strong>{deleteDefTarget?.title}</strong>? Any unexecuted proposals
+              for this draft will also be removed. This cannot be undone.
+            </p>
+            {deleteError ? <ErrorBanner error={deleteError} /> : null}
+          </div>
         }
-      >
-        <div className="space-y-4">
-          {submitError ? <ErrorBanner error={submitError} /> : null}
-          <Callout tone="info" title="Pre-review validation runs automatically">
-            The API runs a <code className="border border-leaf-200 bg-leaf-100 px-1 font-mono text-xs">BEGIN … ROLLBACK</code> dry-run. Timeout
-            or lock-not-available results are recorded as <strong>inconclusive</strong>, not
-            rejected.
-          </Callout>
-          <Field label="Note for approvers" htmlFor="proposal-comment">
-            <Textarea
-              id="proposal-comment"
-              value={submitComment}
-              onChange={(event) => setSubmitComment(event.target.value)}
-              placeholder="Context, risk, or rollout window…"
-            />
-          </Field>
-          {submitTarget ? (
-            <div className="border-2 border-ink bg-leaf-50 p-3 text-sm">
-              <p className="m-0 font-semibold text-ink">{submitTarget.title}</p>
-              <p className="m-0 mt-1 font-mono text-xs text-ink-soft">
-                effective_seq {submitTarget.effective_seq} · {submitTarget.execution_mode} ·{" "}
-                {submitTarget.is_irreversible ? "irreversible" : "reversible"}
-              </p>
-            </div>
-          ) : null}
-        </div>
-      </Modal>
+        confirmLabel="Delete draft"
+        tone="danger"
+        loading={deleting}
+      />
+
+      <ConfirmDialog
+        open={deletePropTarget !== null}
+        onClose={() => {
+          setDeletePropTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => void deleteProposal()}
+        title="Delete proposal?"
+        description={
+          <div className="space-y-2">
+            <p className="m-0">
+              Permanently delete the <strong>{deletePropTarget?.status.replaceAll("_", " ")}</strong>{" "}
+              proposal for <strong>{deletePropTarget?.migration_title}</strong>? This cannot be
+              undone.
+            </p>
+            {deleteError ? <ErrorBanner error={deleteError} /> : null}
+          </div>
+        }
+        confirmLabel="Delete proposal"
+        tone="danger"
+        loading={deleting}
+      />
     </div>
   );
 }

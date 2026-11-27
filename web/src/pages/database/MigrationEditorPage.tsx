@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Save, Send, Undo2, Wand2 } from "lucide-react";
+import { ArrowLeft, Save, Send, Trash2, Undo2, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -139,6 +139,8 @@ export default function MigrationEditorPage() {
   const [dryRun, setDryRun] = useState<DryRunResult | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
   const [withdrawing, setWithdrawing] = useState(false);
 
@@ -181,6 +183,7 @@ export default function MigrationEditorPage() {
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["database", dbId, "migrations"] }),
+      queryClient.invalidateQueries({ queryKey: ["database", dbId, "proposals"] }),
       queryClient.invalidateQueries({ queryKey: ["database", dbId, "overview"] }),
     ]);
   };
@@ -262,6 +265,23 @@ export default function MigrationEditorPage() {
     }
   };
 
+  const remove = async () => {
+    if (!migration) return;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      await migrationApi.delete(dbId, migration.id);
+      toast.success("Draft deleted", `"${migration.title}" was removed.`);
+      setDeleteOpen(false);
+      await invalidate();
+      navigate(`/databases/${dbId}/migrations`, { replace: true });
+    } catch (error) {
+      setActionError(error);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const withdraw = async () => {
     if (!activeProposal) return;
     setWithdrawing(true);
@@ -306,6 +326,17 @@ export default function MigrationEditorPage() {
             <Link to={`/databases/${dbId}/migrations`} className="btn btn-secondary">
               <ArrowLeft className="h-4 w-4" /> Back
             </Link>
+            {!isNew && !readOnly && !migration?.is_superseded ? (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setActionError(null);
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            ) : null}
             {!readOnly ? (
               <Button variant="secondary" onClick={() => void save()} loading={saving}>
                 <Save className="h-4 w-4" /> Save
@@ -689,6 +720,28 @@ export default function MigrationEditorPage() {
         confirmLabel="Submit proposal"
         tone="primary"
         loading={submitting}
+      />
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onClose={() => {
+          setDeleteOpen(false);
+          setActionError(null);
+        }}
+        onConfirm={() => void remove()}
+        title="Delete migration draft?"
+        description={
+          <div className="space-y-2">
+            <p className="m-0">
+              Permanently delete <strong>{migration?.title}</strong>? Any unexecuted proposals for
+              this draft will also be removed. This cannot be undone.
+            </p>
+            {actionError ? <ErrorBanner error={actionError} /> : null}
+          </div>
+        }
+        confirmLabel="Delete draft"
+        tone="danger"
+        loading={deleting}
       />
     </div>
   );

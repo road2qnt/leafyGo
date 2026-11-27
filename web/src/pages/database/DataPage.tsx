@@ -68,6 +68,13 @@ export default function DataPage() {
         q: search || undefined,
       }),
     enabled: Boolean(dbId && activeTableName),
+    // Keep the current rows and pager in place while another page of the same table loads.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === dbId &&
+      previousQuery.queryKey[3] === activeSchema &&
+      previousQuery.queryKey[4] === activeTableName
+        ? previous
+        : undefined,
   });
 
   const data = dataQuery.data;
@@ -76,6 +83,16 @@ export default function DataPage() {
         JSON.stringify(row).toLowerCase().includes(search.toLowerCase()),
       )
     : (data?.rows ?? []);
+
+  const firstRow = data && data.rows.length > 0 ? (data.page - 1) * data.page_size + 1 : 0;
+  const lastRow = data && data.rows.length > 0 ? firstRow + data.rows.length - 1 : 0;
+  const rangeInfo = !data
+    ? null
+    : search
+      ? `${visibleRows.length} matching on page ${data.page}`
+      : data.total_rows === null
+        ? `Page ${data.page}`
+        : `Showing ${firstRow} to ${lastRow} of ${formatNumber(data.total_rows)} entries`;
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -132,7 +149,7 @@ export default function DataPage() {
             </Select>
           </div>
           <form
-            className="flex flex-1 items-end gap-2 max-lg:order-last md:max-lg:col-span-2"
+            className="flex flex-1 items-end gap-2"
             onSubmit={submitSearch}
           >
             <div className="min-w-0 flex-1">
@@ -149,22 +166,6 @@ export default function DataPage() {
               <Search className="h-4 w-4" /> <span className="max-[22.5rem]:sr-only">Search</span>
             </button>
           </form>
-          <div className="lg:w-40">
-            <label className="label" htmlFor="data-page-size">
-              Show
-            </label>
-            <Select
-              id="data-page-size"
-              value={String(pageSize)}
-              onChange={(event) => setPageSize(Number(event.target.value))}
-            >
-              {[10, 20, 50, 100].map((size) => (
-                <option key={size} value={size}>
-                  {size} rows per page
-                </option>
-              ))}
-            </Select>
-          </div>
         </div>
       </div>
 
@@ -173,7 +174,8 @@ export default function DataPage() {
           {activeSchema}.{activeTableName}
         </h2>
         <p className="m-0 text-sm text-muted">
-          {formatNumber(data?.total_rows ?? 0)} rows · Data is read only
+          {data && data.total_rows !== null ? `${formatNumber(data.total_rows)} rows · ` : null}Data is
+          read only
         </p>
       </div>
 
@@ -249,10 +251,18 @@ export default function DataPage() {
             </tbody>
           </table>
         </TableWrap>
-        {data && data.total_pages > 1 ? (
-          <div className="-mt-0.5 border-x-2 border-b-2 border-ink">
-            <Pagination page={data.page} totalPages={data.total_pages} onChange={setPage} />
-          </div>
+        {data ? (
+          <Pagination
+            label="Data"
+            page={page}
+            totalPages={data.total_pages}
+            pageSize={pageSize}
+            pageSizes={[10, 20, 25, 50, 100]}
+            unit="rows per page"
+            info={rangeInfo}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         ) : null}
         </div>
       )}

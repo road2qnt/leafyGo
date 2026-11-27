@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ThumbsDown, ThumbsUp, Undo2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ThumbsDown, ThumbsUp, Trash2, Undo2 } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
 import { migrationApi } from "../../api/endpoints";
 import type { ApprovalRow } from "../../api/types";
@@ -12,6 +12,7 @@ import {
   Callout,
   Card,
   CodeBlock,
+  ConfirmDialog,
   ErrorBanner,
   Field,
   KeyValue,
@@ -43,6 +44,7 @@ export default function ProposalReviewPage() {
   const { dbId = "", proposalId = "" } = useParams();
   const { overview } = useDatabaseContext();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
 
@@ -62,6 +64,8 @@ export default function ProposalReviewPage() {
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
   const [decisionError, setDecisionError] = useState<unknown>(null);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [queuedJobID, setQueuedJobID] = useState<string | null>(null);
 
   const canEdit = overview.level === "edit";
@@ -117,6 +121,22 @@ export default function ProposalReviewPage() {
     }
   };
 
+  const deleteProposal = async () => {
+    setDeleting(true);
+    setDecisionError(null);
+    try {
+      await migrationApi.deleteProposal(dbId, proposalId);
+      setDeleteOpen(false);
+      await invalidate();
+      toast.success("Proposal deleted", "The proposal was removed.");
+      navigate(`/databases/${dbId}/migrations`, { replace: true });
+    } catch (error) {
+      setDecisionError(error);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (detailQuery.isLoading) return <PageLoader label="Loading proposal" />;
   if (detailQuery.isError || !detailQuery.data) {
     return (
@@ -136,6 +156,11 @@ export default function ProposalReviewPage() {
   const canWithdraw =
     can_withdraw ||
     (proposal.status === "pending_review" && proposal.proposed_by_username === user?.username);
+  const canDelete =
+    canEdit &&
+    (proposal.status === "rejected" ||
+      proposal.status === "withdrawn" ||
+      proposal.status === "draft");
   const summary = proposal.approval_summary;
   const reviewOpen = proposal.status === "pending_review";
   const activeJobId = proposal.job_id ?? queuedJobID;
@@ -183,15 +208,30 @@ export default function ProposalReviewPage() {
           </>
         }
         actions={
-          activeJobId ? (
-            <Link to={`/databases/${dbId}/jobs/${activeJobId}`} className="btn btn-primary">
-              Open job monitor <ArrowRight className="h-4 w-4" />
+          <>
+            <Link to={`/databases/${dbId}/migrations`} className="btn btn-secondary">
+              <ArrowLeft className="h-4 w-4" /> Back
             </Link>
-          ) : canWithdraw ? (
-            <Button variant="secondary" onClick={() => void withdraw()} loading={withdrawing}>
-              <Undo2 className="h-4 w-4" /> Withdraw
-            </Button>
-          ) : null
+            {activeJobId ? (
+              <Link to={`/databases/${dbId}/jobs/${activeJobId}`} className="btn btn-primary">
+                Open job monitor <ArrowRight className="h-4 w-4" />
+              </Link>
+            ) : canWithdraw ? (
+              <Button variant="secondary" onClick={() => void withdraw()} loading={withdrawing}>
+                <Undo2 className="h-4 w-4" /> Withdraw
+              </Button>
+            ) : canDelete ? (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setDecisionError(null);
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            ) : null}
+          </>
         }
       />
 
@@ -216,8 +256,8 @@ export default function ProposalReviewPage() {
       ) : null}
 
       {proposal.status === "partial" ||
-      proposal.status === "partially_reverted" ||
-      proposal.status === "uncertain" ? (
+        proposal.status === "partially_reverted" ||
+        proposal.status === "uncertain" ? (
         <Callout tone="warning" title="Database is held by a non-terminal execution">
           A new migration on this database must wait. Retry/revert from the job monitor, or let the
           automatic evidence re-probe resolve uncertain commits.
@@ -318,9 +358,8 @@ export default function ProposalReviewPage() {
                       <td data-label="Leader" className="td font-semibold text-ink">{row.leader_username}</td>
                       <td data-label="Access" className="td">
                         <span
-                          className={`badge ${
-                            row.access_level === "edit" ? "badge-success" : "badge-info"
-                          }`}
+                          className={`badge ${row.access_level === "edit" ? "badge-success" : "badge-info"
+                            }`}
                         >
                           {row.access_level === "edit" ? "View + Edit" : "View Only"}
                         </span>
@@ -404,7 +443,7 @@ export default function ProposalReviewPage() {
               ) : (
                 <Callout tone="neutral" title="Not your action">
                   {canEdit
-                    ? "Only the leader of a required group can approve or reject. Membership in the group is not enough."
+                    ? "Only the leader of a required group can approve or reject. "
                     : "You have View Only access. Approval requires being the leader of a required group."}
                 </Callout>
               )}
@@ -457,6 +496,28 @@ export default function ProposalReviewPage() {
           </Card>
         </aside>
       </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onClose={() => {
+          setDeleteOpen(false);
+          setDecisionError(null);
+        }}
+        onConfirm={() => void deleteProposal()}
+        title="Delete proposal?"
+        description={
+          <div className="space-y-2">
+            <p className="m-0">
+              Permanently delete this <strong>{proposal.status.replaceAll("_", " ")}</strong>{" "}
+              proposal for <strong>{proposal.migration_title}</strong>? This cannot be undone.
+            </p>
+            {decisionError ? <ErrorBanner error={decisionError} /> : null}
+          </div>
+        }
+        confirmLabel="Delete proposal"
+        tone="danger"
+        loading={deleting}
+      />
     </div>
   );
 }

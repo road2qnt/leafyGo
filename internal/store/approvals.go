@@ -466,6 +466,65 @@ func (s *Store) WithdrawProposal(ctx context.Context, dbID, proposalID uuid.UUID
 	return updated, nil
 }
 
+// DeleteMigrationProposal deletes an unexecuted, non-active proposal ('draft', 'withdrawn', or 'rejected')
+// along with its approver snapshot and approval decisions.
+func (s *Store) DeleteMigrationProposal(ctx context.Context, dbID, proposalID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete proposal begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	prop, err := scanProposalRow(tx.QueryRow(ctx, `
+		select p.id, p.db_id, p.migration_id, p.migration_revision,
+		       p.action_type, p.target_execution_id, p.resolution, p.reason,
+		       p.status, p.proposed_by, coalesce((select u.username from users u where u.id = p.proposed_by), ''),
+		       p.created_at, p.updated_at
+		from migration_proposals p
+		where p.id = $1 and p.db_id = $2
+		for update of p`, proposalID, dbID))
+	if err != nil {
+		return err
+	}
+
+	switch prop.Status {
+	case domain.ProposalDraft, domain.ProposalWithdrawn, domain.ProposalRejected:
+		// deletable
+	case domain.ProposalPendingReview:
+		return fmt.Errorf("%w: withdraw a pending proposal before deleting it", ErrConflict)
+	default:
+		return fmt.Errorf("%w: approved or executed proposals cannot be deleted", ErrConflict)
+	}
+
+	var hasHistory bool
+	if err := tx.QueryRow(ctx, `
+		select exists (
+			select 1 from migration_jobs where proposal_id = $1
+			union all
+			select 1 from migration_executions where proposal_id = $1
+		)`, proposalID).Scan(&hasHistory); err != nil {
+		return fmt.Errorf("check proposal history: %w", err)
+	}
+	if hasHistory {
+		return fmt.Errorf("%w: proposal has execution history and cannot be deleted", ErrConflict)
+	}
+
+	if _, err := tx.Exec(ctx, `delete from migration_approvals where proposal_id = $1`, proposalID); err != nil {
+		return fmt.Errorf("delete proposal approvals: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `delete from migration_proposal_approvers where proposal_id = $1`, proposalID); err != nil {
+		return fmt.Errorf("delete proposal approvers: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `delete from migration_proposals where id = $1 and db_id = $2`, proposalID, dbID); err != nil {
+		return fmt.Errorf("delete proposal: %w", mapWriteError(err))
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete proposal commit: %w", err)
+	}
+	return nil
+}
+
 type requiredQuorumGroupRow struct {
 	GroupID          uuid.UUID
 	GroupName        string

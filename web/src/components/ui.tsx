@@ -25,6 +25,7 @@ import { createPortal } from "react-dom";
 import { NavLink } from "react-router";
 
 import { isApiError } from "../api/client";
+import { PAGE_SIZES } from "../hooks/usePagination";
 import { errorGuidance, type Tone } from "../lib/status";
 import {
   ACTION_LABELS,
@@ -636,46 +637,92 @@ export function TableEmpty({ colSpan, children }: { colSpan: number; children: R
 }
 
 export function Pagination({
+  label,
   page,
   totalPages,
-  onChange,
+  pageSize,
+  pageSizes = PAGE_SIZES,
+  unit = "entries",
+  info,
+  from,
+  to,
+  total,
+  filteredFrom,
+  onPageChange,
+  onPageSizeChange,
 }: {
+  /** Names the controls for screen readers, e.g. "Users". */
+  label: string;
   page: number;
   totalPages: number;
-  onChange: (page: number) => void;
+  pageSize: number;
+  pageSizes?: number[];
+  unit?: string;
+  /** Replaces the "Showing X to Y of Z" line. */
+  info?: ReactNode;
+  from?: number;
+  to?: number;
+  total?: number;
+  /** Size of the list before filtering. */
+  filteredFrom?: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
 }) {
-  if (totalPages <= 1) return null;
-
+  const selectId = useId();
   const pages: Array<number | "gap"> = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    let gap = false;
-    for (let i = 1; i <= totalPages; i++) {
-      if (i === 1 || i === totalPages || (i >= page - 1 && i <= page + 1)) {
-        pages.push(i);
-        gap = false;
-      } else if (!gap) {
-        pages.push("gap");
-        gap = true;
-      }
+  let gap = false;
+  for (let i = 1; i <= totalPages; i++) {
+    if (totalPages <= 7 || i === 1 || i === totalPages || (i >= page - 1 && i <= page + 1)) {
+      pages.push(i);
+      gap = false;
+    } else if (!gap) {
+      pages.push("gap");
+      gap = true;
     }
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t-2 border-ink bg-canvas px-3 py-2.5 text-sm text-muted sm:px-4">
-      <span>
-        Page <strong className="text-ink">{page}</strong> of{" "}
-        <strong className="text-ink">{totalPages}</strong>
-      </span>
-      <nav className="inline-flex flex-wrap items-center gap-1.5 max-sm:w-full max-sm:justify-between" aria-label="Pagination">
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="inline-flex items-center gap-2 text-ink-soft">
+          <label htmlFor={selectId}>Show</label>
+          <Select
+            id={selectId}
+            value={String(pageSize)}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            className="min-h-[2.25rem] w-auto py-1 pr-9 pl-2.5 text-sm"
+          >
+            {pageSizes.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </Select>
+          <span>{unit}</span>
+        </div>
+        <span className="text-muted" aria-live="polite">
+          {info ?? (
+            <>
+              Showing {from} to {to} of {total} entries
+              {filteredFrom !== undefined && total !== undefined && total < filteredFrom
+                ? ` (filtered from ${filteredFrom})`
+                : null}
+            </>
+          )}
+        </span>
+      </div>
+      <nav
+        className="inline-flex flex-wrap items-center gap-1.5 max-sm:w-full max-sm:justify-between"
+        aria-label={`${label} pages`}
+      >
         <Button
+          type="button"
           variant="secondary"
           size="sm"
-          onClick={() => onChange(page - 1)}
+          onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
         >
-          <ChevronLeft className="h-4 w-4" /> Previous
+          <ChevronLeft className="h-4 w-4" aria-hidden /> Previous
         </Button>
         <ul className="m-0 flex list-none flex-wrap gap-1 p-0 max-sm:order-last max-sm:w-full max-sm:justify-center">
           {pages.map((p, index) =>
@@ -691,15 +738,16 @@ export function Pagination({
               <li key={p}>
                 <button
                   type="button"
-                  onClick={() => onChange(p)}
+                  onClick={() => onPageChange(p)}
                   aria-current={p === page ? "page" : undefined}
                   className={cn(
-                    "grid h-9 min-w-9 cursor-pointer place-items-center border-2 border-ink px-2 text-sm font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11",
+                    "grid h-9 min-w-9 cursor-pointer place-items-center border-2 px-2 text-sm font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11",
                     p === page
                       ? "border-leaf-700 bg-leaf-700 text-paper"
-                      : "bg-paper text-ink hover:bg-leaf-50",
+                      : "border-ink bg-paper text-ink hover:bg-leaf-50",
                   )}
                 >
+                  <span className="sr-only">Page </span>
                   {p}
                 </button>
               </li>
@@ -707,12 +755,13 @@ export function Pagination({
           )}
         </ul>
         <Button
+          type="button"
           variant="secondary"
           size="sm"
-          onClick={() => onChange(page + 1)}
+          onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
         >
-          Next <ChevronRight className="h-4 w-4" />
+          Next <ChevronRight className="h-4 w-4" aria-hidden />
         </Button>
       </nav>
     </div>

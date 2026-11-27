@@ -136,7 +136,7 @@ export interface DataResponse {
   rows: Array<Record<string, unknown>>;
   page: number;
   page_size: number;
-  total_rows: number;
+  total_rows: number | null;
   total_pages: number;
   truncated: boolean;
 }

@@ -11,10 +11,12 @@ import {
   Button,
   Callout,
   ErrorBanner,
+  Pagination,
   TableEmpty,
   TableWrap,
 } from "../../components/ui";
 import { SqlEditor } from "../../components/SqlEditor";
+import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 import { cellValue, formatNumber } from "../../lib/format";
 import { useDatabaseContext } from "./context";
@@ -38,6 +40,7 @@ export default function QueryConsolePage() {
   const [saving, setSaving] = useState(false);
 
   const canEdit = overview.level === "edit";
+  const resultPage = usePagination(result?.rows ?? [], { defaultSize: 25, resetKey: result });
 
   useEffect(() => {
     setResult(null);
@@ -231,60 +234,65 @@ export default function QueryConsolePage() {
                 <Callout tone="info">{result.notices.join(" ")}</Callout>
               ) : null}
 
-              <TableWrap>
-                <table className="table-base table-pin min-w-full">
-                  <thead>
-                    <tr>
-                      {result.columns.map((column) => (
-                        <th key={column.name} scope="col" className="th th-data whitespace-nowrap">
-                          {column.name}
-                          {column.data_type ? (
-                            <span className="ml-2 font-mono text-xs font-normal text-lime">
-                              {column.data_type}
-                            </span>
-                          ) : null}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.rows.map((row, index) => (
-                      <tr key={index}>
-                        {result.columns.map((column) => {
-                          const val = row[column.name];
-                          const isNull = val === null || val === undefined;
-                          const isNum = typeof val === "number";
-                          return (
-                            <td
-                              key={column.name}
-                              className={`td max-w-[28rem] truncate font-mono text-sm whitespace-nowrap ${
-                                isNum ? "text-right tabular-nums" : ""
-                              }`}
-                              title={cellValue(val)}
-                            >
-                              {isNull ? (
-                                <span className="text-muted italic">NULL</span>
-                              ) : val === "" ? (
-                                <span className="text-muted italic">
-                                  {`''`}
-                                  <span className="sr-only"> (empty string)</span>
-                                </span>
-                              ) : (
-                                cellValue(val)
-                              )}
-                            </td>
-                          );
-                        })}
+              <div>
+                <TableWrap>
+                  <table className="table-base table-pin min-w-full">
+                    <thead>
+                      <tr>
+                        {result.columns.map((column) => (
+                          <th key={column.name} scope="col" className="th th-data whitespace-nowrap">
+                            {column.name}
+                            {column.data_type ? (
+                              <span className="ml-2 font-mono text-xs font-normal text-lime">
+                                {column.data_type}
+                              </span>
+                            ) : null}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                    {result.rows.length === 0 ? (
-                      <TableEmpty colSpan={Math.max(1, result.columns.length)}>
-                        Query returned zero rows.
-                      </TableEmpty>
-                    ) : null}
-                  </tbody>
-                </table>
-              </TableWrap>
+                    </thead>
+                    <tbody>
+                      {resultPage.pageItems.map((row, index) => (
+                        <tr key={index}>
+                          {result.columns.map((column) => {
+                            const val = row[column.name];
+                            const isNull = val === null || val === undefined;
+                            const isNum = typeof val === "number";
+                            return (
+                              <td
+                                key={column.name}
+                                className={`td max-w-[28rem] truncate font-mono text-sm whitespace-nowrap ${
+                                  isNum ? "text-right tabular-nums" : ""
+                                }`}
+                                title={cellValue(val)}
+                              >
+                                {isNull ? (
+                                  <span className="text-muted italic">NULL</span>
+                                ) : val === "" ? (
+                                  <span className="text-muted italic">
+                                    {`''`}
+                                    <span className="sr-only"> (empty string)</span>
+                                  </span>
+                                ) : (
+                                  cellValue(val)
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                      {result.rows.length === 0 ? (
+                        <TableEmpty colSpan={Math.max(1, result.columns.length)}>
+                          Query returned zero rows.
+                        </TableEmpty>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </TableWrap>
+                {result.rows.length > 0 ? (
+                  <Pagination label="Result" {...resultPage.controls} />
+                ) : null}
+              </div>
             </>
           ) : (
             <Callout tone="neutral" title="No result yet">

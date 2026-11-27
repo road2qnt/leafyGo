@@ -44,12 +44,14 @@ type Options struct {
 type WorkflowStore interface {
 	CreateMigrationDefinition(ctx context.Context, def domain.MigrationDefinition) (domain.MigrationDefinition, error)
 	UpdateMigrationDefinition(ctx context.Context, def domain.MigrationDefinition) (domain.MigrationDefinition, error)
+	DeleteMigrationDefinition(ctx context.Context, dbID, migrationID uuid.UUID) error
 	GetMigrationDefinition(ctx context.Context, dbID, migrationID uuid.UUID) (domain.MigrationDefinition, error)
 	ListMigrationDefinitions(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationDefinition, error)
 	SubmitProposalToReview(ctx context.Context, in store.SubmitProposalInput) (domain.MigrationProposal, error)
 	GetMigrationProposal(ctx context.Context, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error)
 	ListMigrationProposals(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationProposal, error)
 	WithdrawProposal(ctx context.Context, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error)
+	DeleteMigrationProposal(ctx context.Context, dbID, proposalID uuid.UUID) error
 	ApproveProposal(ctx context.Context, in store.ApproveProposalInput) (store.ApproveProposalResult, error)
 	RejectProposal(ctx context.Context, in store.ApproveProposalInput) (domain.MigrationProposal, error)
 	ListMigrationExecutions(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationExecution, error)
@@ -386,6 +388,32 @@ func (s *Service) UpdateDefinition(ctx context.Context, actor domain.User, level
 		return domain.MigrationDefinition{}, mapStoreWorkflowError(err)
 	}
 	return updated, nil
+}
+
+func (s *Service) DeleteDefinition(ctx context.Context, actor domain.User, level domain.AccessLevel, dbID, migrationID uuid.UUID) error {
+	if actor.IsPlatformAdmin || level < domain.LevelEdit {
+		return ErrForbidden
+	}
+	if s.workflow == nil {
+		return errors.New("workflow store not configured")
+	}
+	if err := s.workflow.DeleteMigrationDefinition(ctx, dbID, migrationID); err != nil {
+		return mapStoreWorkflowError(err)
+	}
+	return nil
+}
+
+func (s *Service) DeleteProposal(ctx context.Context, actor domain.User, level domain.AccessLevel, dbID, proposalID uuid.UUID) error {
+	if actor.IsPlatformAdmin || level < domain.LevelEdit {
+		return ErrForbidden
+	}
+	if s.workflow == nil {
+		return errors.New("workflow store not configured")
+	}
+	if err := s.workflow.DeleteMigrationProposal(ctx, dbID, proposalID); err != nil {
+		return mapStoreWorkflowError(err)
+	}
+	return nil
 }
 
 // ListHistory returns all migration execution attempts for dbID, filtered with FilterHistoryExecutions

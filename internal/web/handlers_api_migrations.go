@@ -191,6 +191,22 @@ func (s *Server) handleAPIMigrationUpdate(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (s *Server) handleAPIMigrationDelete(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	db := currentDB(r)
+	level := currentLevel(r)
+	mid, ok := urlID(r, "mid")
+	if !ok {
+		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Migration definition not found.")
+		return
+	}
+	if err := s.migrations.DeleteDefinition(r.Context(), *user, level, db.ID, mid); err != nil {
+		s.writeMigrationWorkflowError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleAPIMigrationValidate(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	db := currentDB(r)
@@ -313,6 +329,22 @@ func (s *Server) handleAPIProposalWithdraw(w http.ResponseWriter, r *http.Reques
 		"status":   prop.Status,
 		"proposal": prop,
 	})
+}
+
+func (s *Server) handleAPIProposalDelete(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	db := currentDB(r)
+	level := currentLevel(r)
+	pid, ok := urlID(r, "pid")
+	if !ok {
+		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Proposal not found.")
+		return
+	}
+	if err := s.migrations.DeleteProposal(r.Context(), *user, level, db.ID, pid); err != nil {
+		s.writeMigrationWorkflowError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type apiApprovalDecisionRequest struct {

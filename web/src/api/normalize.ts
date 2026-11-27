@@ -146,7 +146,15 @@ export function normalizeData(raw: Any): DataResponse {
   });
   const page = Number(raw.page ?? 1);
   const pageSize = Number(raw.page_size ?? 20);
-  const total = Number(raw.total_rows ?? raw.row_count ?? rows.length) || rows.length;
+  // The viewer API omits row_count when it cannot count the table, and always sends has_next.
+  const count = raw.total_rows ?? raw.row_count;
+  const total =
+    count === undefined || count === null
+      ? typeof raw.has_next === "boolean"
+        ? null
+        : rows.length
+      : Number(count);
+  const knownPages = total === null ? page : Math.max(1, Math.ceil(total / pageSize));
   return {
     table: String(raw.table ?? ""),
     columns,
@@ -154,7 +162,7 @@ export function normalizeData(raw: Any): DataResponse {
     page,
     page_size: pageSize,
     total_rows: total,
-    total_pages: Math.max(1, Math.ceil(total / pageSize)),
+    total_pages: raw.has_next ? Math.max(knownPages, page + 1) : knownPages,
     truncated: Boolean(raw.truncated),
   };
 }

@@ -13,10 +13,12 @@ import {
   Field,
   PageHeader,
   PageLoader,
+  Pagination,
   Select,
   TableWrap,
   TextInput,
 } from "../../components/ui";
+import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 import { formatDateTime } from "../../lib/format";
 
@@ -50,9 +52,10 @@ function DatabasesListView() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; text: string }>>({});
 
-  if (databasesQuery.isLoading) return <PageLoader label="Loading connections" />;
-
   const databases = databasesQuery.data?.databases ?? [];
+  const connectionsPage = usePagination(databases);
+
+  if (databasesQuery.isLoading) return <PageLoader label="Loading connections" />;
 
   const testConnection = async (database: Database) => {
     setTestingId(database.id);
@@ -106,74 +109,77 @@ function DatabasesListView() {
 
       <section aria-labelledby="conn-caption">
         {databases.length > 0 ? (
-          <TableWrap>
-            <table className="table-base table-stack">
-              <caption id="conn-caption">
-                {databases.length} {databases.length === 1 ? "connection" : "connections"}
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col" className="th">Name</th>
-                  <th scope="col" className="th">Endpoint</th>
-                  <th scope="col" className="th text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {databases.map((database) => {
-                  const status = testResult[database.id];
-                  return (
-                    <tr key={database.id}>
-                      <th scope="row" data-label="Name" className="td cell-title">
-                        <Link
-                          to={`/admin/databases/${database.id}`}
-                          className="font-semibold text-leaf-800 hover:text-leaf-900"
-                        >
-                          {database.name}
-                        </Link>
-                      </th>
-                      <td data-label="Endpoint" className="td cell-wide">
-                        <div>
-                          <span className="font-mono text-sm break-all text-ink">
-                            {database.username}@{database.host}:{database.port}/{database.db_name}
-                          </span>
-                          <span className="mt-1 block text-xs text-muted">
-                            SSL {database.ssl_mode} · updated {formatDateTime(database.updated_at)}
-                          </span>
-                          {status ? (
-                            <span
-                              className={`mt-1 inline-block text-xs font-semibold uppercase ${
-                                status.ok ? "text-leaf-700" : "text-crimson"
-                              }`}
-                            >
-                              {status.text}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td data-label="Actions" className="td cell-actions w-[1%] text-right whitespace-nowrap">
-                        <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            loading={testingId === database.id}
-                            onClick={() => void testConnection(database)}
-                          >
-                            Test connection<span className="sr-only"> {database.name}</span>
-                          </Button>
+          <div>
+            <TableWrap>
+              <table className="table-base table-stack">
+                <caption id="conn-caption">
+                  {databases.length} {databases.length === 1 ? "connection" : "connections"}
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="th">Name</th>
+                    <th scope="col" className="th">Endpoint</th>
+                    <th scope="col" className="th text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {connectionsPage.pageItems.map((database) => {
+                    const status = testResult[database.id];
+                    return (
+                      <tr key={database.id}>
+                        <th scope="row" data-label="Name" className="td cell-title">
                           <Link
                             to={`/admin/databases/${database.id}`}
-                            className="btn btn-sm"
+                            className="font-semibold text-leaf-800 hover:text-leaf-900"
                           >
-                            Edit<span className="sr-only"> {database.name}</span>
+                            {database.name}
                           </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
+                        </th>
+                        <td data-label="Endpoint" className="td cell-wide">
+                          <div>
+                            <span className="font-mono text-sm break-all text-ink">
+                              {database.username}@{database.host}:{database.port}/{database.db_name}
+                            </span>
+                            <span className="mt-1 block text-xs text-muted">
+                              SSL {database.ssl_mode} · updated {formatDateTime(database.updated_at)}
+                            </span>
+                            {status ? (
+                              <span
+                                className={`mt-1 inline-block text-xs font-semibold uppercase ${
+                                  status.ok ? "text-leaf-700" : "text-crimson"
+                                }`}
+                              >
+                                {status.text}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td data-label="Actions" className="td cell-actions w-[1%] text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              loading={testingId === database.id}
+                              onClick={() => void testConnection(database)}
+                            >
+                              Test connection<span className="sr-only"> {database.name}</span>
+                            </Button>
+                            <Link
+                              to={`/admin/databases/${database.id}`}
+                              className="btn btn-sm"
+                            >
+                              Edit<span className="sr-only"> {database.name}</span>
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+            <Pagination label="Connections" {...connectionsPage.controls} />
+          </div>
         ) : (
           <EmptyState
             title="No connections yet"

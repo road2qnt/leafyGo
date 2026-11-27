@@ -14,12 +14,14 @@ import {
   ConfirmDialog,
   ErrorBanner,
   PageLoader,
+  Pagination,
   SearchInput,
   StatusBadge,
   TableEmpty,
   TableWrap,
 } from "../../components/ui";
 import { reveal } from "../../components/reveal";
+import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 import {
   formatDateTime,
@@ -86,6 +88,10 @@ export default function HistoryPage() {
       ),
     [executions, filter],
   );
+
+  const historyPage = usePagination(filtered, {
+    resetKey: `${dbId}|${hideRollback}|${filter}`,
+  });
 
   if (historyQuery.isLoading) return <PageLoader label="Loading history" />;
 
@@ -252,7 +258,7 @@ export default function HistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((execution) => {
+              {historyPage.pageItems.map((execution) => {
                 const isSelected = selected?.execution_id === execution.execution_id;
                 return (
                   <tr
@@ -364,6 +370,13 @@ export default function HistoryPage() {
             </tbody>
           </table>
         </TableWrap>
+        {executions.length > 0 ? (
+          <Pagination
+            label="History"
+            {...historyPage.controls}
+            filteredFrom={executions.length}
+          />
+        ) : null}
       </section>
 
       <ConfirmDialog

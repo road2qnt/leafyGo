@@ -284,6 +284,8 @@ export const migrationApi = {
     });
     return normalizeMigration(updated, await definitionList(dbId));
   },
+  delete: (dbId: string, migrationId: string) =>
+    api<void>(`/databases/${dbId}/migrations/${migrationId}`, { method: "DELETE" }),
   validate: async (dbId: string, migrationId: string): Promise<DryRunResult> => {
     const raw = await api<Any>(`/databases/${dbId}/migrations/${migrationId}/validate`, { method: "POST" });
     return {
@@ -362,6 +364,8 @@ export const migrationApi = {
     ]);
     return normalizeProposal(raw.proposal ?? raw, migrations);
   },
+  deleteProposal: (dbId: string, proposalId: string) =>
+    api<void>(`/databases/${dbId}/proposals/${proposalId}`, { method: "DELETE" }),
 };
 
 export const jobApi = {

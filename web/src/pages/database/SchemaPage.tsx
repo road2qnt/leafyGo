@@ -8,11 +8,13 @@ import {
   EmptyState,
   ErrorBanner,
   PageLoader,
+  Pagination,
   SearchInput,
   TableEmpty,
   TableWrap,
 } from "../../components/ui";
 import { reveal } from "../../components/reveal";
+import { usePagination } from "../../hooks/usePagination";
 import { formatBytes, formatNumber } from "../../lib/format";
 
 export default function SchemaPage() {
@@ -42,6 +44,8 @@ export default function SchemaPage() {
     setFilter("");
   }, [dbId]);
 
+  const tablesPage = usePagination(filtered, { resetKey: `${dbId}|${filter}` });
+
   const activeTable =
     tables.find((table) => `${table.schema}.${table.name}` === selected || table.name === selected) ??
     tables[0];
@@ -69,53 +73,56 @@ export default function SchemaPage() {
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.65fr)]">
           <section aria-labelledby="tables-caption" className="space-y-3">
             <SearchInput value={filter} onChange={setFilter} placeholder="Filter tables…" />
-            <TableWrap>
-              <table className="table-base">
-                <caption id="tables-caption">
-                  {filtered.length} {filtered.length === 1 ? "table or view" : "tables and views"}
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col" className="th">Schema</th>
-                    <th scope="col" className="th">Name</th>
-                    <th scope="col" className="th text-right">Rows</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((table) => {
-                    const key = `${table.schema}.${table.name}`;
-                    const isSelected =
-                      activeTable?.schema === table.schema && activeTable?.name === table.name;
-                    return (
-                      <tr
-                        key={key}
-                        className={isSelected ? "is-selected" : undefined}
-                      >
-                        <td className="td font-mono text-xs text-ink-soft">{table.schema}</td>
-                        <th scope="row" className="td font-mono">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelected(key);
-                              reveal("table-detail");
-                            }}
-                            className="cursor-pointer border-0 bg-transparent p-0 text-left font-mono font-semibold break-all text-leaf-800 underline hover:text-leaf-900 pointer-coarse:min-h-11 pointer-coarse:w-full"
-                          >
-                            {table.name}
-                          </button>
-                        </th>
-                        <td className="td text-right font-mono tabular-nums">
-                          {formatNumber(table.row_estimate)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {filtered.length === 0 ? (
-                    <TableEmpty colSpan={3}>No table matches the filter.</TableEmpty>
-                  ) : null}
-                </tbody>
-              </table>
-            </TableWrap>
+            <div>
+              <TableWrap>
+                <table className="table-base">
+                  <caption id="tables-caption">
+                    {filtered.length} {filtered.length === 1 ? "table or view" : "tables and views"}
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col" className="th">Schema</th>
+                      <th scope="col" className="th">Name</th>
+                      <th scope="col" className="th text-right">Rows</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tablesPage.pageItems.map((table) => {
+                      const key = `${table.schema}.${table.name}`;
+                      const isSelected =
+                        activeTable?.schema === table.schema && activeTable?.name === table.name;
+                      return (
+                        <tr
+                          key={key}
+                          className={isSelected ? "is-selected" : undefined}
+                        >
+                          <td className="td font-mono text-xs text-ink-soft">{table.schema}</td>
+                          <th scope="row" className="td font-mono">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelected(key);
+                                reveal("table-detail");
+                              }}
+                              className="cursor-pointer border-0 bg-transparent p-0 text-left font-mono font-semibold break-all text-leaf-800 underline hover:text-leaf-900 pointer-coarse:min-h-11 pointer-coarse:w-full"
+                            >
+                              {table.name}
+                            </button>
+                          </th>
+                          <td className="td text-right font-mono tabular-nums">
+                            {formatNumber(table.row_estimate)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filtered.length === 0 ? (
+                      <TableEmpty colSpan={3}>No table matches the filter.</TableEmpty>
+                    ) : null}
+                  </tbody>
+                </table>
+              </TableWrap>
+              <Pagination label="Tables" {...tablesPage.controls} filteredFrom={tables.length} />
+            </div>
           </section>
 
           <section id="table-detail" className="min-w-0 space-y-4">

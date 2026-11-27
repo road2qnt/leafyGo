@@ -23,6 +23,7 @@ import {
   Modal,
   PageHeader,
   PageLoader,
+  Pagination,
   ProgressBar,
   SectionHeader,
   StatusBadge,
@@ -30,6 +31,7 @@ import {
   TableWrap,
   Textarea,
 } from "../../components/ui";
+import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
 import {
   formatDateTime,
@@ -109,6 +111,8 @@ export default function JobMonitorPage() {
       void queryClient.invalidateQueries({ queryKey: ["databases"] });
     }
   }, [detailQuery.data?.job.status, dbId, queryClient]);
+
+  const attemptsPage = usePagination(detailQuery.data?.attempts ?? [], { resetKey: jobId });
 
   if (detailQuery.isLoading) return <PageLoader label="Loading job" />;
   if (detailQuery.isError || !detailQuery.data) {
@@ -355,7 +359,7 @@ export default function JobMonitorPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {attempts.map((attempt) => (
+                  {attemptsPage.pageItems.map((attempt) => (
                     <tr key={attempt.execution_id}>
                       <th scope="row" data-label="Attempt" className="td text-right font-mono tabular-nums">
                         <div>
@@ -402,6 +406,9 @@ export default function JobMonitorPage() {
                 </tbody>
               </table>
             </TableWrap>
+            {attempts.length > 0 ? (
+              <Pagination label="Attempts" {...attemptsPage.controls} />
+            ) : null}
           </section>
 
           {job.status === "failed" && canEdit ? (

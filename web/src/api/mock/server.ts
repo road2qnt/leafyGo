@@ -828,7 +828,7 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
       requireDatabase(dbId);
       const tableName = search.get("table") ?? state.schemas[dbId]?.[0]?.name ?? "";
       const page = Math.max(1, Number(search.get("page") ?? 1));
-      const pageSize = Math.min(100, Math.max(5, Number(search.get("page_size") ?? 20)));
+      const pageSize = Math.min(100, Math.max(5, Number(search.get("limit") ?? 20)));
       const query = (search.get("q") ?? "").toLowerCase();
       const { columns, rows } = rowsForTable(dbId, tableName);
       const filtered = query ? rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query)) : rows;

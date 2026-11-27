@@ -578,6 +578,70 @@ func (s *Store) UpdateMigrationDefinition(ctx context.Context, def domain.Migrat
 	return updated, nil
 }
 
+// DeleteMigrationDefinition permanently deletes an unexecuted migration definition draft
+// (and any non-active, unexecuted proposals attached to it).
+func (s *Store) DeleteMigrationDefinition(ctx context.Context, dbID, migrationID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete migration_definition begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, err := s.LockMigrationDefinitionTx(ctx, tx, dbID, migrationID)
+	if err != nil {
+		return err
+	}
+	if current.IsImmutable || current.IsSuperseded {
+		return ErrMigrationImmutable
+	}
+
+	hasActive, err := s.HasActiveProposalTx(ctx, tx, migrationID)
+	if err != nil {
+		return err
+	}
+	if hasActive {
+		return ErrActiveProposalExists
+	}
+
+	var hasHistoryOrRefs bool
+	if err := tx.QueryRow(ctx, `
+		select exists (
+			select 1 from migration_executions where migration_id = $1
+			union all
+			select 1 from migration_jobs where migration_id = $1
+			union all
+			select 1 from migration_definitions
+			where replaces_migration_id = $1 or superseded_by_migration_id = $1
+		)`, migrationID).Scan(&hasHistoryOrRefs); err != nil {
+		return fmt.Errorf("check migration_definition history: %w", err)
+	}
+	if hasHistoryOrRefs {
+		return ErrMigrationImmutable
+	}
+
+	if _, err := tx.Exec(ctx, `
+		delete from migration_approvals
+		where proposal_id in (select id from migration_proposals where migration_id = $1)`, migrationID); err != nil {
+		return fmt.Errorf("delete migration_definition approvals: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		delete from migration_proposal_approvers
+		where proposal_id in (select id from migration_proposals where migration_id = $1)`, migrationID); err != nil {
+		return fmt.Errorf("delete migration_definition proposal approvers: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `delete from migration_proposals where migration_id = $1`, migrationID); err != nil {
+		return fmt.Errorf("delete migration_definition proposals: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `delete from migration_definitions where id = $1 and db_id = $2`, migrationID, dbID); err != nil {
+		return fmt.Errorf("delete migration_definition: %w", mapWriteError(err))
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete migration_definition commit: %w", err)
+	}
+	return nil
+}
+
 // BumpMigrationDefinitionRevisionTx increments revision by 1 when a proposal is withdrawn.
 func (s *Store) BumpMigrationDefinitionRevisionTx(ctx context.Context, tx pgx.Tx, dbID, migrationID uuid.UUID) (int, error) {
 	var newRev int

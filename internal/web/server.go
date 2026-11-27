@@ -219,11 +219,13 @@ func (s *Server) Handler() http.Handler {
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/migrations", s.handleAPIMigrationCreate)
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/migrations/{mid}", s.handleAPIMigrationGet)
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Put("/migrations/{mid}", s.handleAPIMigrationUpdate)
+				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Delete("/migrations/{mid}", s.handleAPIMigrationDelete)
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/migrations/{mid}/validate", s.handleAPIMigrationValidate)
 
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/proposals", s.handleAPIProposalsList)
 				r.With(s.apiRequireDBAction(access.ActionProposeMigration)).Post("/proposals", s.handleAPIProposalSubmit)
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/proposals/{pid}", s.handleAPIProposalGet)
+				r.With(s.apiRequireDBAction(access.ActionWithdrawProposal)).Delete("/proposals/{pid}", s.handleAPIProposalDelete)
 				r.With(s.apiRequireDBAction(access.ActionWithdrawProposal)).Post("/proposals/{pid}/withdraw", s.handleAPIProposalWithdraw)
 				r.With(s.apiRequireDBAction(access.ActionApproveProposal)).Post("/proposals/{pid}/approve", s.handleAPIProposalApprove)
 				r.With(s.apiRequireDBAction(access.ActionApproveProposal)).Post("/proposals/{pid}/reject", s.handleAPIProposalReject)
