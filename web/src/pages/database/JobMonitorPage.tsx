@@ -1,12 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   History,
   RefreshCcw,
   RotateCcw,
   ShieldQuestion,
   Undo2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { jobApi, migrationApi } from "../../api/endpoints";
@@ -40,6 +41,7 @@ import {
   formatRelative,
   truncateMiddle,
 } from "../../lib/format";
+import { findRollbackAndForwardTargets } from "../../lib/history";
 import { jobActions } from "../../lib/jobActions";
 import { actionLabel, isActiveJob, JOB_STATUS_META } from "../../lib/status";
 import { useDatabaseContext } from "./context";
@@ -90,6 +92,14 @@ export default function JobMonitorPage() {
       return status && isActiveJob(status) ? 1_500 : false;
     },
   });
+  const historyQuery = useQuery({
+    queryKey: ["database", dbId, "history", false],
+    queryFn: () => jobApi.history(dbId, false),
+  });
+  const { topActiveExecutionId, latestRollbackIds } = useMemo(
+    () => findRollbackAndForwardTargets(historyQuery.data?.executions ?? []),
+    [historyQuery.data],
+  );
 
   const [proposalAction, setProposalAction] = useState<ProposalAction | null>(null);
   const [reason, setReason] = useState("");
@@ -105,6 +115,7 @@ export default function JobMonitorPage() {
     if (["success", "failed"].includes(status) && terminalStatus.current !== status) {
       terminalStatus.current = status;
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "overview"] });
+      void queryClient.invalidateQueries({ queryKey: ["database", dbId, "jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "history"] });
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "migrations"] });
       void queryClient.invalidateQueries({ queryKey: ["database", dbId, "proposals"] });
@@ -160,8 +171,8 @@ export default function JobMonitorPage() {
         <nav aria-label="Job location">
           <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
             <li>
-              <Link to={`/databases/${dbId}/overview`} className="text-leaf-800 hover:text-leaf-900">
-                Overview
+              <Link to={`/databases/${dbId}/jobs`} className="text-leaf-800 hover:text-leaf-900">
+                Jobs & queue
               </Link>
             </li>
             <li className="flex items-center gap-2">
@@ -196,6 +207,16 @@ export default function JobMonitorPage() {
         }
         actions={
           <>
+            <Link
+              to={
+                job.proposal_id
+                  ? `/databases/${dbId}/proposals/${job.proposal_id}`
+                  : `/databases/${dbId}/migrations`
+              }
+              className="btn btn-secondary"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back
+            </Link>
             <Button variant="secondary" onClick={() => void detailQuery.refetch()}>
               <RefreshCcw className="h-4 w-4" /> Refresh
             </Button>
@@ -221,7 +242,7 @@ export default function JobMonitorPage() {
                 <Undo2 className="h-4 w-4" /> Revert batches
               </Button>
             ) : null}
-            {canEdit && actions.rollback ? (
+            {canEdit && actions.rollback && executionId && topActiveExecutionId === executionId ? (
               <Button
                 onClick={() => {
                   setProposalAction("rollback");
@@ -231,7 +252,7 @@ export default function JobMonitorPage() {
                 <Undo2 className="h-4 w-4" /> Propose rollback
               </Button>
             ) : null}
-            {canEdit && actions.forward ? (
+            {canEdit && actions.forward && executionId && latestRollbackIds.has(executionId) ? (
               <Button
                 onClick={() => {
                   setProposalAction("forward");
@@ -489,21 +510,6 @@ export default function JobMonitorPage() {
               </p>
             </Card>
           ) : null}
-
-          <Card className="p-4 sm:p-5">
-            <h2 className="section-title">Directions</h2>
-            <ul className="m-0 mt-2 space-y-2 pl-5 text-sm leading-relaxed text-ink-soft">
-              <li>
-                <strong>Forward:</strong> SQL Up from the next batch.
-              </li>
-              <li>
-                <strong>Reverse:</strong> SQL Down from the highest batch.
-              </li>
-              <li>
-                <strong>Holds:</strong> Never expire by lease; they require an explicit resolution.
-              </li>
-            </ul>
-          </Card>
 
           <Card className="p-4 sm:p-5">
             <h2 className="section-title mb-2">History link</h2>

@@ -447,6 +447,26 @@
     color: var(--ink);
   }
 
+  .btn-warning {
+    background: var(--amber-50);
+    color: var(--amber-800);
+    border-color: var(--amber-800);
+  }
+  .btn-warning:hover {
+    background: #ffe8ad;
+    color: var(--amber-800);
+  }
+
+  .btn-info {
+    background: var(--blue-50);
+    color: var(--blue-700);
+    border-color: var(--blue-700);
+  }
+  .btn-info:hover {
+    background: #d5e4f8;
+    color: var(--blue-700);
+  }
+
   .btn-sm {
     min-height: 2.25rem;
     padding: 0.25rem 0.75rem;

@@ -233,6 +233,7 @@ func (s *Server) Handler() http.Handler {
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/history", s.handleAPIHistoryList)
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/history/{execID}", s.handleAPIHistoryDetail)
 
+				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/jobs", s.handleAPIJobsList)
 				r.With(s.apiRequireDBAction(access.ActionViewHistory)).Get("/jobs/{jobID}", s.handleAPIJobGet)
 			})
 		})

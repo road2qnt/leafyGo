@@ -1070,6 +1070,40 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
 
     if (section === "jobs") {
       requireDatabase(dbId);
+      if (!parts[3] && method === "GET") {
+        const dbJobs = state.jobs
+          .filter((entry) => entry.db_id === dbId)
+          .sort((a, b) => b.queue_seq - a.queue_seq);
+        for (const job of dbJobs) {
+          if (job.status === "queued" || job.status === "running") {
+            tickJob(job);
+          }
+        }
+        const held = dbJobs.find(
+          (entry) =>
+            entry.lock_state ||
+            entry.status === "running" ||
+            entry.status === "partial" ||
+            entry.status === "partially_reverted" ||
+            entry.status === "uncertain",
+        );
+        const lockState =
+          held?.lock_state ??
+          (held?.status === "running"
+            ? "running"
+            : held?.status === "partial"
+              ? "partial_hold"
+              : held?.status === "partially_reverted"
+                ? "partially_reverted_hold"
+                : held?.status === "uncertain"
+                  ? "uncertain_hold"
+                  : null);
+        return ok({
+          jobs: dbJobs,
+          lock_state: lockState,
+          active_job_id: held?.job_id ?? null,
+        });
+      }
       const job = state.jobs.find((entry) => entry.job_id === parts[3] && entry.db_id === dbId);
       if (!job) mockError(404, "JOB_NOT_FOUND", "Job not found.");
       if (method === "GET") {

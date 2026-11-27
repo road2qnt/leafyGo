@@ -99,6 +99,48 @@ func validActionType(actionType string) bool {
 	}
 }
 
+func (s *Store) checkConflictingDirectionProposalTx(ctx context.Context, tx pgx.Tx, dbID uuid.UUID, effectiveSeq int64, actionType string) error {
+	var conflict bool
+	var err error
+	switch actionType {
+	case domain.ActionApply, domain.ActionForward:
+		err = tx.QueryRow(ctx, `
+			select exists (
+				select 1
+				from migration_proposals p
+				join migration_definitions d on d.id = p.migration_id
+				where p.db_id = $1
+				  and p.status in ('pending_review', 'approved', 'queued', 'running')
+				  and p.action_type = 'rollback'
+				  and d.effective_seq <= $2
+			)`, dbID, effectiveSeq).Scan(&conflict)
+		if err != nil {
+			return fmt.Errorf("check conflicting rollback proposal: %w", err)
+		}
+		if conflict {
+			return fmt.Errorf("%w: an active rollback proposal exists for an earlier or same migration; finish or withdraw it first", ErrConflict)
+		}
+	case domain.ActionRollback:
+		err = tx.QueryRow(ctx, `
+			select exists (
+				select 1
+				from migration_proposals p
+				join migration_definitions d on d.id = p.migration_id
+				where p.db_id = $1
+				  and p.status in ('pending_review', 'approved', 'queued', 'running')
+				  and p.action_type in ('apply', 'forward')
+				  and d.effective_seq >= $2
+			)`, dbID, effectiveSeq).Scan(&conflict)
+		if err != nil {
+			return fmt.Errorf("check conflicting apply/forward proposal: %w", err)
+		}
+		if conflict {
+			return fmt.Errorf("%w: an active apply or forward proposal exists for a later or same migration; finish or withdraw it first", ErrConflict)
+		}
+	}
+	return nil
+}
+
 func scanProposalRow(row pgx.Row) (domain.MigrationProposal, error) {
 	var r proposalRow
 	err := row.Scan(
@@ -217,6 +259,11 @@ func (s *Store) SubmitProposalToReview(ctx context.Context, in SubmitProposalInp
 	}
 	if hasActive {
 		return domain.MigrationProposal{}, ErrDuplicateActiveProposal
+	}
+
+	// 3b. Block conflicting opposite-direction active proposals on the same database
+	if err := s.checkConflictingDirectionProposalTx(ctx, tx, in.DBID, def.EffectiveSeq, in.ActionType); err != nil {
+		return domain.MigrationProposal{}, err
 	}
 
 	// 4. Re-validate supersede rules if definition replaces another migration
@@ -352,16 +399,32 @@ func (s *Store) getProposalTx(ctx context.Context, q interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }, dbID, proposalID uuid.UUID) (domain.MigrationProposal, error) {
-	prop, err := scanProposalRow(q.QueryRow(ctx, `
+	var r proposalRow
+	var jobID pgtype.UUID
+	err := q.QueryRow(ctx, `
 		select p.id, p.db_id, p.migration_id, p.migration_revision,
 		       p.action_type, p.target_execution_id, p.resolution, p.reason,
 		       p.status, p.proposed_by, coalesce(u.username, ''),
-		       p.created_at, p.updated_at
+		       p.created_at, p.updated_at, j.job_id
 		from migration_proposals p
 		left join users u on u.id = p.proposed_by
-		where p.id = $1 and p.db_id = $2`, proposalID, dbID))
+		left join migration_jobs j on j.proposal_id = p.id
+		where p.id = $1 and p.db_id = $2`, proposalID, dbID).Scan(
+		&r.ID, &r.DBID, &r.MigrationID, &r.MigrationRevision,
+		&r.ActionType, &r.TargetExecutionID, &r.Resolution, &r.Reason,
+		&r.Status, &r.ProposedBy, &r.ProposedByUsername,
+		&r.CreatedAt, &r.UpdatedAt, &jobID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.MigrationProposal{}, ErrNotFound
+	}
 	if err != nil {
-		return domain.MigrationProposal{}, err
+		return domain.MigrationProposal{}, fmt.Errorf("scan migration_proposal: %w", err)
+	}
+	prop := r.toDomain()
+	if jobID.Valid {
+		id := uuid.UUID(jobID.Bytes)
+		prop.JobID = &id
 	}
 	approvers, approvals, err := s.loadProposalApproversAndApprovalsTx(ctx, q, proposalID)
 	if err != nil {
@@ -381,9 +444,10 @@ func (s *Store) ListMigrationProposals(ctx context.Context, dbID uuid.UUID) ([]d
 		select p.id, p.db_id, p.migration_id, p.migration_revision,
 		       p.action_type, p.target_execution_id, p.resolution, p.reason,
 		       p.status, p.proposed_by, coalesce(u.username, ''),
-		       p.created_at, p.updated_at
+		       p.created_at, p.updated_at, j.job_id
 		from migration_proposals p
 		left join users u on u.id = p.proposed_by
+		left join migration_jobs j on j.proposal_id = p.id
 		where p.db_id = $1
 		order by p.created_at desc`, dbID)
 	if err != nil {
@@ -392,16 +456,22 @@ func (s *Store) ListMigrationProposals(ctx context.Context, dbID uuid.UUID) ([]d
 	var proposals []domain.MigrationProposal
 	for rows.Next() {
 		var r proposalRow
+		var jobID pgtype.UUID
 		if err := rows.Scan(
 			&r.ID, &r.DBID, &r.MigrationID, &r.MigrationRevision,
 			&r.ActionType, &r.TargetExecutionID, &r.Resolution, &r.Reason,
 			&r.Status, &r.ProposedBy, &r.ProposedByUsername,
-			&r.CreatedAt, &r.UpdatedAt,
+			&r.CreatedAt, &r.UpdatedAt, &jobID,
 		); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan migration_proposal: %w", err)
 		}
-		proposals = append(proposals, r.toDomain())
+		p := r.toDomain()
+		if jobID.Valid {
+			id := uuid.UUID(jobID.Bytes)
+			p.JobID = &id
+		}
+		proposals = append(proposals, p)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -735,20 +805,21 @@ func (s *Store) checkPredecessorApprovalGateTx(ctx context.Context, tx pgx.Tx, d
 
 	switch prop.ActionType {
 	case domain.ActionApply, domain.ActionForward:
-		// Current slot must not already be active or have an in-flight apply/forward job
+		// Current slot must not already be active or have an in-flight apply/forward/rollback job
 		if _, alreadyActive := activeBySeq[def.EffectiveSeq]; alreadyActive {
 			return nil, ErrPredecessorNotReady
 		}
-		if inFlightApplyForwardBySeq[def.EffectiveSeq] {
+		if inFlightApplyForwardBySeq[def.EffectiveSeq] || inFlightRollbackBySeq[def.EffectiveSeq] {
 			return nil, ErrPredecessorNotReady
 		}
-		// Every predecessor effective_seq < def.EffectiveSeq must be Active OR have a queued/running apply/forward job
+		// Every predecessor effective_seq < def.EffectiveSeq must be Active OR have a queued/running apply/forward job,
+		// and must not have a queued/running rollback job.
 		for _, seq := range distinctSeqs {
 			if seq >= def.EffectiveSeq {
 				continue
 			}
 			_, isActive := activeBySeq[seq]
-			if !isActive && !inFlightApplyForwardBySeq[seq] {
+			if (!isActive && !inFlightApplyForwardBySeq[seq]) || inFlightRollbackBySeq[seq] {
 				return nil, ErrPredecessorNotReady
 			}
 		}
@@ -756,15 +827,21 @@ func (s *Store) checkPredecessorApprovalGateTx(ctx context.Context, tx pgx.Tx, d
 
 	case domain.ActionRollback:
 		activeExecID, isDefActive := activeMap[def.ID]
-		if !isDefActive {
+		if !isDefActive || inFlightRollbackBySeq[def.EffectiveSeq] {
 			return nil, ErrPredecessorNotReady
 		}
 		if prop.TargetExecutionID != nil && *prop.TargetExecutionID != activeExecID {
 			return nil, ErrPredecessorNotReady
 		}
-		// Every currently Active migration with effective_seq > def.EffectiveSeq must already have a queued/running rollback job
+		// Every currently Active migration with effective_seq > def.EffectiveSeq must already have a queued/running rollback job,
+		// and no later slot may have a queued/running apply/forward job.
 		for seq := range activeBySeq {
 			if seq > def.EffectiveSeq && !inFlightRollbackBySeq[seq] {
+				return nil, ErrPredecessorNotReady
+			}
+		}
+		for seq := range inFlightApplyForwardBySeq {
+			if seq > def.EffectiveSeq {
 				return nil, ErrPredecessorNotReady
 			}
 		}

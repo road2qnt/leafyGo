@@ -97,6 +97,7 @@ type MigrationProposal struct {
 	ProposedByUsername string              `json:"proposed_by_username"`
 	CreatedAt          time.Time           `json:"created_at"`
 	UpdatedAt          time.Time           `json:"updated_at"`
+	JobID              *uuid.UUID          `json:"job_id,omitempty"`
 	Approvers          []ProposalApprover  `json:"approvers,omitempty"`
 	Approvals          []MigrationApproval `json:"approvals,omitempty"`
 }

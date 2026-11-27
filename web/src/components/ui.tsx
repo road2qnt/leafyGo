@@ -47,6 +47,8 @@ const buttonVariants = {
   ghost: "btn-ghost",
   danger: "btn-danger",
   lime: "btn-lime",
+  warning: "btn-warning",
+  info: "btn-info",
 } as const;
 
 type ButtonVariant = keyof typeof buttonVariants;
@@ -131,9 +133,19 @@ export function StatusBadge({ status, kind = "job", className }: StatusBadgeProp
   return <span className={cn("badge", toneBadge[tone], className)}>{label}</span>;
 }
 
+const actionTone: Record<ActionType, Tone> = {
+  apply: "success",
+  forward: "info",
+  rollback: "warning",
+  batch_retry: "info",
+  batch_revert: "danger",
+  resolve_uncertain: "plum",
+};
+
 export function ActionBadge({ action }: { action: ActionType | string | null | undefined }) {
   const label = action ? (ACTION_LABELS[action as ActionType] ?? action) : "—";
-  return <span className="badge badge-neutral font-mono">{label}</span>;
+  const tone: Tone = action && action in actionTone ? actionTone[action as ActionType] : "neutral";
+  return <span className={cn("badge font-mono", toneBadge[tone])}>{label}</span>;
 }
 
 export function LevelBadge({ level }: { level: "view" | "edit" | undefined | null }) {

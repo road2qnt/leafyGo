@@ -288,11 +288,13 @@ export default function MigrationEditorPage() {
     setActionError(null);
     try {
       await migrationApi.withdraw(dbId, activeProposal.id);
+      await migrationApi.deleteProposal(dbId, activeProposal.id);
       toast.success(
         "Proposal withdrawn",
-        "Approvals are cleared and the definition is editable again.",
+        "The proposal was removed and the definition is editable again.",
       );
       await invalidate();
+      navigate(`/databases/${dbId}/migrations`, { replace: true });
     } catch (error) {
       setActionError(error);
     } finally {

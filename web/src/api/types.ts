@@ -317,6 +317,12 @@ export interface JobDetail {
   };
 }
 
+export interface JobsListResponse {
+  jobs: Job[];
+  lock_state: LockState | null;
+  active_job_id: string | null;
+}
+
 export interface HistoryResponse {
   executions: Execution[];
 }

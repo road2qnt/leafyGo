@@ -152,6 +152,14 @@ export default function DatabaseLayout() {
               ),
             },
             {
+              to: `/databases/${dbId}/jobs`,
+              label: (
+                <span>
+                  Jobs<span className="max-md:sr-only"> & queue</span>
+                </span>
+              ),
+            },
+            {
               to: `/databases/${dbId}/history`,
               label: (
                 <span>

@@ -11,6 +11,7 @@ import DatabaseLayout from "./pages/database/DatabaseLayout";
 import DataPage from "./pages/database/DataPage";
 import HistoryPage from "./pages/database/HistoryPage";
 import JobMonitorPage from "./pages/database/JobMonitorPage";
+import JobsPage from "./pages/database/JobsPage";
 import MigrationEditorPage from "./pages/database/MigrationEditorPage";
 import MigrationsPage from "./pages/database/MigrationsPage";
 import OverviewPage from "./pages/database/OverviewPage";
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="migrations/new" element={<MigrationEditorPage />} />
             <Route path="migrations/:migrationId/edit" element={<MigrationEditorPage />} />
             <Route path="proposals/:proposalId" element={<ProposalReviewPage />} />
+            <Route path="jobs" element={<JobsPage />} />
             <Route path="jobs/:jobId" element={<JobMonitorPage />} />
             <Route path="history" element={<HistoryPage />} />
           </Route>

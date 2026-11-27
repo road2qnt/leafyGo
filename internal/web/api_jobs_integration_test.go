@@ -143,4 +143,33 @@ func TestAPIJobStatus(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("viewer lists database jobs and lock", func(t *testing.T) {
+		listPath := "/api/v1/databases/" + orders.ID.String() + "/jobs"
+		rec := getWithSession(t, srv, listPath, viewerSID)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body = %s", rec.Code, rec.Body)
+		}
+		var got jobsListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got.Jobs) != 1 || got.Jobs[0].JobID != job.ID {
+			t.Fatalf("jobs = %+v; want 1 job %s", got.Jobs, job.ID)
+		}
+		if got.LockState == nil || *got.LockState != domain.LockRunning {
+			t.Fatalf("lock_state = %v; want running", got.LockState)
+		}
+		if got.ActiveJobID == nil || *got.ActiveJobID != job.ID {
+			t.Fatalf("active_job_id = %v; want %s", got.ActiveJobID, job.ID)
+		}
+
+		// Outsider and admin cannot list jobs on orders.
+		if r := getWithSession(t, srv, listPath, outsiderSID); r.Code != http.StatusForbidden {
+			t.Fatalf("outsider status = %d; want 403", r.Code)
+		}
+		if r := getWithSession(t, srv, listPath, adminSID); r.Code != http.StatusForbidden {
+			t.Fatalf("admin status = %d; want 403", r.Code)
+		}
+	})
 }

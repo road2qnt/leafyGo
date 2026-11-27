@@ -146,5 +146,23 @@ func TestCheckPredecessorGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rollback slot 1 with slot 2 rollback already queued failed: %v", err)
 	}
+
+	// 7. Forward on slot 2 while slot 1 has a queued/running rollback job -> 409 PREDECESSOR_NOT_READY
+	err = CheckPredecessorGate(domain.ActionForward, 2, []SlotReadinessState{
+		{EffectiveSeq: 1, IsActive: true, HasQueuedOrRunningRevert: true},
+		{EffectiveSeq: 2, IsActive: false},
+	})
+	if !errors.Is(err, ErrPredecessorNotReady) {
+		t.Fatalf("forward slot 2 while slot 1 rollback queued err = %v; want ErrPredecessorNotReady", err)
+	}
+
+	// 8. Rollback on slot 1 while slot 2 has a queued/running forward/apply job -> 409 PREDECESSOR_NOT_READY
+	err = CheckPredecessorGate(domain.ActionRollback, 1, []SlotReadinessState{
+		{EffectiveSeq: 1, IsActive: true},
+		{EffectiveSeq: 2, IsActive: false, HasQueuedOrRunningApply: true},
+	})
+	if !errors.Is(err, ErrPredecessorNotReady) {
+		t.Fatalf("rollback slot 1 while slot 2 forward queued err = %v; want ErrPredecessorNotReady", err)
+	}
 }
 

@@ -417,6 +417,48 @@ func (s *Store) GetJob(ctx context.Context, jobID uuid.UUID) (domain.MigrationJo
 	return getJob(ctx, s.pool, jobID)
 }
 
+func (s *Store) ListJobs(ctx context.Context, dbID uuid.UUID) ([]domain.MigrationJob, error) {
+	rows, err := s.pool.Query(ctx, `
+		select j.job_id, j.queue_seq, j.db_id, j.proposal_id, j.migration_id, j.execution_id, e.root_execution_id,
+		       j.action_type, j.execution_mode, j.status, j.retry_count, j.max_retries, j.next_run_at,
+		       j.last_cursor, j.scope_min_cursor, j.scope_max_cursor,
+		       j.total_batches, j.completed_batches, j.committed_rows,
+		       j.trace_parent, j.trace_state, j.correlation_id, j.worker_id, j.last_error,
+		       j.queued_at, j.started_at, j.finished_at, j.updated_at
+		from migration_jobs j
+		join migration_executions e on e.execution_id = j.execution_id
+		where j.db_id = $1
+		order by j.queue_seq desc`, dbID)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := make([]domain.MigrationJob, 0)
+	for rows.Next() {
+		var j domain.MigrationJob
+		var workerID *string
+		if err := rows.Scan(
+			&j.ID, &j.QueueSeq, &j.DBID, &j.ProposalID, &j.MigrationID, &j.ExecutionID, &j.RootExecutionID,
+			&j.ActionType, &j.ExecutionMode, &j.Status, &j.RetryCount, &j.MaxRetries, &j.NextRunAt,
+			&j.LastCursor, &j.ScopeMinCursor, &j.ScopeMaxCursor,
+			&j.TotalBatches, &j.CompletedBatches, &j.CommittedRows,
+			&j.TraceParent, &j.TraceState, &j.CorrelationID, &workerID, &j.LastError,
+			&j.QueuedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		if workerID != nil {
+			j.WorkerID = *workerID
+		}
+		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list jobs rows: %w", err)
+	}
+	return jobs, nil
+}
+
 func getJob(ctx context.Context, q querier, jobID uuid.UUID) (domain.MigrationJob, error) {
 	var j domain.MigrationJob
 	var workerID *string

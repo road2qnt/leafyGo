@@ -26,6 +26,7 @@ import type {
   Group,
   HistoryResponse,
   JobDetail,
+  JobsListResponse,
   MigrationDefinition,
   Proposal,
   ProposalDetail,
@@ -369,6 +370,19 @@ export const migrationApi = {
 };
 
 export const jobApi = {
+  list: async (dbId: string): Promise<JobsListResponse> => {
+    const [raw, migrations] = await Promise.all([
+      api<{ jobs: Any[]; lock_state?: JobsListResponse["lock_state"]; active_job_id?: string | null }>(
+        `/databases/${dbId}/jobs`,
+      ),
+      definitionList(dbId),
+    ]);
+    return {
+      jobs: (raw.jobs ?? []).map((row) => normalizeJob(row, migrations, [])),
+      lock_state: raw.lock_state ?? null,
+      active_job_id: raw.active_job_id ? String(raw.active_job_id) : null,
+    };
+  },
   detail: async (dbId: string, jobId: string): Promise<JobDetail> => {
     const [rawResponse, history, migrations] = await Promise.all([
       api<Any>(`/databases/${dbId}/jobs/${jobId}`),

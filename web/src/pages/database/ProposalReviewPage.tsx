@@ -27,7 +27,6 @@ import {
 } from "../../components/ui";
 import { useToast } from "../../hooks/useToast";
 import { formatDateTime, formatRelative, percent } from "../../lib/format";
-import { dryRunMeta } from "../../lib/dryRun";
 import { useDatabaseContext } from "./context";
 
 function DecisionBadge({ row }: { row: ApprovalRow }) {
@@ -112,8 +111,15 @@ export default function ProposalReviewPage() {
     setDecisionError(null);
     try {
       await migrationApi.withdraw(dbId, proposalId);
-      await invalidate();
-      toast.success("Proposal withdrawn", "All approvals were discarded.");
+      await migrationApi.deleteProposal(dbId, proposalId);
+      queryClient.removeQueries({ queryKey: ["database", dbId, "proposal", proposalId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["database", dbId, "proposals"] }),
+        queryClient.invalidateQueries({ queryKey: ["database", dbId, "migrations"] }),
+        queryClient.invalidateQueries({ queryKey: ["database", dbId, "overview"] }),
+      ]);
+      toast.success("Proposal withdrawn", "The proposal was removed and all approvals were discarded.");
+      navigate(`/databases/${dbId}/migrations`, { replace: true });
     } catch (error) {
       setDecisionError(error);
     } finally {
@@ -164,13 +170,6 @@ export default function ProposalReviewPage() {
   const summary = proposal.approval_summary;
   const reviewOpen = proposal.status === "pending_review";
   const activeJobId = proposal.job_id ?? queuedJobID;
-  const dryRun = dryRunMeta(proposal.dry_run_status);
-  const dryRunBadge = {
-    success: "badge-success",
-    warning: "badge-warning",
-    danger: "badge-danger",
-    neutral: "badge-muted",
-  }[dryRun.tone];
 
   return (
     <div className="space-y-6">
@@ -400,7 +399,6 @@ export default function ProposalReviewPage() {
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <StatusBadge status={proposal.status} kind="proposal" />
-              <span className={`badge ${dryRunBadge}`}>{dryRun.label}</span>
             </div>
           </Card>
 
@@ -426,15 +424,12 @@ export default function ProposalReviewPage() {
                       variant="danger"
                       onClick={() => void decide("reject")}
                       loading={deciding === "reject"}
-                      disabled={!dryRun.canReview}
                     >
                       <ThumbsDown className="h-4 w-4" /> Reject
                     </Button>
                     <Button
                       onClick={() => void decide("approve")}
                       loading={deciding === "approve"}
-                      disabled={!dryRun.canReview}
-                      title={dryRun.canReview ? undefined : "Dry-run failed; approval is blocked"}
                     >
                       <ThumbsUp className="h-4 w-4" /> Approve
                     </Button>

@@ -20,7 +20,6 @@ import {
 } from "../../components/ui";
 import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
-import { dryRunMeta } from "../../lib/dryRun";
 import { formatDateTime } from "../../lib/format";
 import { useDatabaseContext } from "./context";
 
@@ -342,7 +341,7 @@ export default function MigrationsPage() {
       <section aria-labelledby="proposals-caption">
         <SectionHeader
           title="Proposals"
-          description="A proposal snapshots the required approvers and the dry-run result."
+          description="A proposal snapshots the required approvers at submission time."
           actions={
             proposalsQuery.isFetching ? (
               <span className="text-xs text-muted">Refreshing…</span>
@@ -361,7 +360,6 @@ export default function MigrationsPage() {
                 <th scope="col" className="th">Action</th>
                 <th scope="col" className="th">Status</th>
                 <th scope="col" className="th">Approvals</th>
-                <th scope="col" className="th">Dry-run</th>
                 <th scope="col" className="th">Proposed by</th>
                 <th scope="col" className="th">Updated</th>
                 <th scope="col" className="th text-right">Actions</th>
@@ -404,18 +402,6 @@ export default function MigrationsPage() {
                       ) : null}
                     </span>
                   </td>
-                  <td data-label="Dry-run" className="td">
-                    {(() => {
-                      const dryRun = dryRunMeta(proposal.dry_run_status);
-                      const toneClass = {
-                        success: "badge-success",
-                        warning: "badge-warning",
-                        danger: "badge-danger",
-                        neutral: "badge-muted",
-                      }[dryRun.tone];
-                      return <span className={`badge ${toneClass}`}>{dryRun.label}</span>;
-                    })()}
-                  </td>
                   <td data-label="Proposed by" className="td">{proposal.proposed_by_username}</td>
                   <td data-label="Updated" className="td col-date text-muted">
                     {formatDateTime(proposal.updated_at)}
@@ -457,7 +443,7 @@ export default function MigrationsPage() {
                 </tr>
               ))}
               {visibleProposals.length === 0 ? (
-                <TableEmpty colSpan={8}>No proposals yet.</TableEmpty>
+                <TableEmpty colSpan={7}>No proposals yet.</TableEmpty>
               ) : null}
             </tbody>
           </table>

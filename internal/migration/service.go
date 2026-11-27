@@ -220,13 +220,13 @@ func CheckPredecessorGate(actionType string, targetEffectiveSeq int64, slots []S
 	switch actionType {
 	case domain.ActionApply, domain.ActionForward:
 		if cur, ok := slotMap[targetEffectiveSeq]; ok {
-			if cur.IsActive || cur.HasQueuedOrRunningApply {
+			if cur.IsActive || cur.HasQueuedOrRunningApply || cur.HasQueuedOrRunningRevert {
 				return ErrPredecessorNotReady
 			}
 		}
 		for _, s := range slots {
 			if s.EffectiveSeq < targetEffectiveSeq {
-				if !s.IsActive && !s.HasQueuedOrRunningApply {
+				if (!s.IsActive && !s.HasQueuedOrRunningApply) || s.HasQueuedOrRunningRevert {
 					return ErrPredecessorNotReady
 				}
 			}
@@ -235,12 +235,14 @@ func CheckPredecessorGate(actionType string, targetEffectiveSeq int64, slots []S
 
 	case domain.ActionRollback:
 		cur, ok := slotMap[targetEffectiveSeq]
-		if !ok || !cur.IsActive {
+		if !ok || !cur.IsActive || cur.HasQueuedOrRunningRevert {
 			return ErrPredecessorNotReady
 		}
 		for _, s := range slots {
-			if s.EffectiveSeq > targetEffectiveSeq && s.IsActive && !s.HasQueuedOrRunningRevert {
-				return ErrPredecessorNotReady
+			if s.EffectiveSeq > targetEffectiveSeq {
+				if (s.IsActive && !s.HasQueuedOrRunningRevert) || s.HasQueuedOrRunningApply {
+					return ErrPredecessorNotReady
+				}
 			}
 		}
 		return nil

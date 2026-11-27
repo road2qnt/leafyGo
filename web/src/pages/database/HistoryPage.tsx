@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCcw, RotateCcw, X } from "lucide-react";
+import { RefreshCcw, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
@@ -23,6 +23,7 @@ import {
 import { reveal } from "../../components/reveal";
 import { usePagination } from "../../hooks/usePagination";
 import { useToast } from "../../hooks/useToast";
+import { findRollbackAndForwardTargets } from "../../lib/history";
 import {
   formatDateTime,
   formatDuration,
@@ -42,11 +43,15 @@ export default function HistoryPage() {
   const [forwardTarget, setForwardTarget] = useState<Execution | null>(null);
   const [forwardError, setForwardError] = useState<unknown>(null);
   const [forwarding, setForwarding] = useState(false);
+  const [rollbackTarget, setRollbackTarget] = useState<Execution | null>(null);
+  const [rollbackError, setRollbackError] = useState<unknown>(null);
+  const [rollingBack, setRollingBack] = useState(false);
 
   useEffect(() => {
     setSelected(null);
     setFilter("");
     setForwardTarget(null);
+    setRollbackTarget(null);
   }, [dbId]);
 
   const canEdit = overview.level === "edit";
@@ -72,13 +77,83 @@ export default function HistoryPage() {
     }
   };
 
+  const proposeRollback = async () => {
+    if (!rollbackTarget) return;
+    setRollingBack(true);
+    setRollbackError(null);
+    try {
+      const proposal = await migrationApi.createProposal(dbId, {
+        migration_id: rollbackTarget.migration_id,
+        action_type: "rollback",
+        target_execution_id: rollbackTarget.execution_id,
+        reason: "Rollback requested from migration history.",
+      });
+      toast.success("Rollback proposal submitted", "Leaders must approve before rolling back.");
+      setRollbackTarget(null);
+      navigate(`/databases/${dbId}/proposals/${proposal.id}`);
+    } catch (error) {
+      setRollbackError(error);
+    } finally {
+      setRollingBack(false);
+    }
+  };
+
   const historyQuery = useQuery({
     queryKey: ["database", dbId, "history", hideRollback],
     queryFn: () => jobApi.history(dbId, hideRollback),
     refetchInterval: 10_000,
   });
 
+  const proposalsQuery = useQuery({
+    queryKey: ["database", dbId, "proposals"],
+    queryFn: () => migrationApi.proposals(dbId),
+    refetchInterval: 10_000,
+  });
+
   const executions = historyQuery.data?.executions ?? [];
+  const activeProposals = useMemo(
+    () =>
+      (proposalsQuery.data?.proposals ?? []).filter((proposal) =>
+        ["pending_review", "approved", "queued", "running"].includes(proposal.status),
+      ),
+    [proposalsQuery.data],
+  );
+
+  const rollbackBlockReason = (execution: Execution): string | undefined => {
+    if (activeProposals.some((p) => p.migration_id === execution.migration_id)) {
+      return "A proposal is already active for this migration.";
+    }
+    if (
+      activeProposals.some(
+        (p) =>
+          (p.action_type === "apply" || p.action_type === "forward") &&
+          p.effective_seq >= execution.effective_seq,
+      )
+    ) {
+      return "An active apply/forward proposal exists for a later migration. Withdraw or finish it first.";
+    }
+    return undefined;
+  };
+
+  const forwardBlockReason = (execution: Execution): string | undefined => {
+    if (activeProposals.some((p) => p.migration_id === execution.migration_id)) {
+      return "A proposal is already active for this migration.";
+    }
+    if (
+      activeProposals.some(
+        (p) => p.action_type === "rollback" && p.effective_seq <= execution.effective_seq,
+      )
+    ) {
+      return "An active rollback proposal exists for an earlier migration. Withdraw or finish it first.";
+    }
+    return undefined;
+  };
+
+  const { topActiveExecutionId, latestRollbackIds } = useMemo(
+    () => findRollbackAndForwardTargets(executions),
+    [executions],
+  );
+
   const filtered = useMemo(
     () =>
       executions.filter(
@@ -330,28 +405,50 @@ export default function HistoryPage() {
                     </td>
                     <td data-label="Actions" className="td cell-actions text-right whitespace-nowrap">
                       <div className="inline-flex flex-wrap justify-end gap-1.5">
-                        {canEdit &&
-                        execution.action_type === "rollback" &&
-                        execution.status === "success" ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="whitespace-normal"
-                            onClick={() => {
-                              setForwardTarget(execution);
-                              setForwardError(null);
-                            }}
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" /> Propose forward
-                          </Button>
-                        ) : null}
+                        {canEdit && topActiveExecutionId === execution.execution_id ? (() => {
+                          const reason = rollbackBlockReason(execution);
+                          return (
+                            <Button
+                              variant="warning"
+                              size="sm"
+                              className="min-w-[5.75rem]"
+                              disabled={Boolean(reason)}
+                              title={reason}
+                              onClick={() => {
+                                setRollbackTarget(execution);
+                                setRollbackError(null);
+                              }}
+                            >
+                              Rollback
+                            </Button>
+                          );
+                        })() : null}
+                        {canEdit && latestRollbackIds.has(execution.execution_id) ? (() => {
+                          const reason = forwardBlockReason(execution);
+                          return (
+                            <Button
+                              variant="info"
+                              size="sm"
+                              className="min-w-[5.75rem]"
+                              disabled={Boolean(reason)}
+                              title={reason}
+                              onClick={() => {
+                                setForwardTarget(execution);
+                                setForwardError(null);
+                              }}
+                            >
+                              Forward
+                            </Button>
+                          );
+                        })() : null}
                         <Button
                           variant="secondary"
                           size="sm"
+                          className="min-w-[5.75rem]"
                           onClick={() => {
-                          setSelected(execution);
-                          reveal("execution-detail");
-                        }}
+                            setSelected(execution);
+                            reveal("execution-detail");
+                          }}
                         >
                           View SQL
                         </Button>
@@ -400,6 +497,30 @@ export default function HistoryPage() {
         confirmLabel="Submit forward proposal"
         tone="primary"
         loading={forwarding}
+      />
+
+      <ConfirmDialog
+        open={rollbackTarget !== null}
+        onClose={() => {
+          setRollbackTarget(null);
+          setRollbackError(null);
+        }}
+        onConfirm={() => void proposeRollback()}
+        title="Propose rollback?"
+        description={
+          <div className="space-y-3">
+            <p className="m-0">
+              Rollback executes <strong>SQL Down</strong> for{" "}
+              <strong>{rollbackTarget?.migration_title_snapshot}</strong>. LIFO rollback is only
+              allowed for the highest active <code className="font-mono">effective_seq</code>, and
+              every required group leader must approve before execution.
+            </p>
+            {rollbackError ? <ErrorBanner error={rollbackError} /> : null}
+          </div>
+        }
+        confirmLabel="Submit rollback proposal"
+        tone="primary"
+        loading={rollingBack}
       />
     </div>
   );

@@ -82,6 +82,46 @@ func newJobStatusResponse(j domain.MigrationJob, lock *domain.DBLock) jobStatusR
 	return resp
 }
 
+type jobsListResponse struct {
+	Jobs        []jobStatusResponse `json:"jobs"`
+	LockState   *string             `json:"lock_state"`
+	ActiveJobID *uuid.UUID          `json:"active_job_id"`
+}
+
+func (s *Server) handleAPIJobsList(w http.ResponseWriter, r *http.Request) {
+	db := currentDB(r)
+	jobs, err := s.store.ListJobs(r.Context(), db.ID)
+	if err != nil {
+		s.logger.Error("list jobs", "error", err)
+		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Could not load jobs.")
+		return
+	}
+
+	var lock *domain.DBLock
+	l, err := s.store.GetDBLock(r.Context(), db.ID)
+	switch {
+	case err == nil:
+		lock = &l
+	case !errors.Is(err, store.ErrNotFound):
+		s.logger.Error("load db lock", "error", err)
+		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Could not load the database lock.")
+		return
+	}
+
+	items := make([]jobStatusResponse, 0, len(jobs))
+	for _, j := range jobs {
+		items = append(items, newJobStatusResponse(j, lock))
+	}
+	resp := jobsListResponse{Jobs: items}
+	if lock != nil {
+		state := lock.LockState
+		jobID := lock.JobID
+		resp.LockState = &state
+		resp.ActiveJobID = &jobID
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // A job on another database answers 404 like a missing one, so job IDs cannot be probed across databases.
 func (s *Server) handleAPIJobGet(w http.ResponseWriter, r *http.Request) {
 	db := currentDB(r)
