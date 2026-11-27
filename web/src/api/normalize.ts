@@ -107,6 +107,7 @@ export function normalizeTable(raw: Any): SchemaTable {
     name: String(raw.name ?? raw.Name ?? ""),
     row_estimate: Number(raw.row_estimate ?? raw.row_count ?? raw.RowCount ?? 0) || 0,
     size_bytes: Number(raw.size_bytes ?? 0) || 0,
+    can_select: raw.can_select === undefined ? true : Boolean(raw.can_select),
     columns: (raw.columns ?? raw.Columns ?? []).map(normalizeColumn),
   };
 }

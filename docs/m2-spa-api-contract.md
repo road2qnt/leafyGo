@@ -41,9 +41,9 @@ Groups:
 
 | Method | Path | Body |
 |---|---|---|
-| GET/POST | `/admin/groups` | `{name, description}` |
+| GET/POST | `/admin/groups` | `{name, description, leader_id}` |
 | PUT | `/admin/groups/{id}` | `{name, description}` |
-| PUT | `/admin/groups/{id}/leader` | `{leader_id}` |
+| PUT | `/admin/groups/{id}/leader` | `{leader_id}` (required) |
 | POST | `/admin/groups/{id}/members` | `{user_id}` (one member) |
 | DELETE | `/admin/groups/{id}/members/{userID}` | — |
 | POST | `/admin/groups/{id}/access` | `{db_id, level: "view"|"edit"|"none"}` |

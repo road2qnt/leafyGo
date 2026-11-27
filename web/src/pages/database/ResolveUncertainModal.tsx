@@ -1,4 +1,4 @@
-import { AlertTriangle, ShieldQuestion } from "lucide-react";
+import { ShieldQuestion } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
@@ -81,7 +81,9 @@ export function ResolveUncertainModal({
       size="md"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
           <Button variant="danger" onClick={() => void submit()} loading={saving}>
             <ShieldQuestion className="h-4 w-4" /> Submit resolution
           </Button>
@@ -89,41 +91,62 @@ export function ResolveUncertainModal({
       }
     >
       <div className="space-y-4">
-        <Callout tone="plum" title="Evidence wins">
+        <Callout tone="warning" title="Evidence wins">
           After the old target session is proven dead, the worker reads{" "}
-          <code className="font-mono text-xs">_leafygo_executions</code>. If your resolution contradicts
-          the evidence, the job fails with{" "}
-          <code className="font-mono text-xs">RESOLVE_UNCERTAIN_INVALID</code> and the database stays
-          locked.
+          <code className="border border-leaf-200 bg-leaf-100 px-1 font-mono text-xs">
+            _leafygo_executions
+          </code>
+          . If your resolution contradicts the evidence, the job fails with{" "}
+          <code className="border border-leaf-200 bg-leaf-100 px-1 font-mono text-xs">
+            RESOLVE_UNCERTAIN_INVALID
+          </code>{" "}
+          and the database stays locked.
         </Callout>
 
         {error ? <ErrorBanner error={error} /> : null}
 
         <div>
           <span className="label">Resolution</span>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {([
-              { value: "committed", title: "Committed", description: "Mark the target execution as success." },
-              { value: "not_committed", title: "Not committed", description: "Mark it failed; release or hold per batches." },
-            ] as const).map((option) => (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                {
+                  value: "committed",
+                  title: "Committed",
+                  description: "Mark the target execution as success.",
+                },
+                {
+                  value: "not_committed",
+                  title: "Not committed",
+                  description: "Mark it failed; release or hold per batches.",
+                },
+              ] as const
+            ).map((option) => (
               <button
                 key={option.value}
                 type="button"
                 onClick={() => setResolution(option.value)}
-                className={`rounded-xl border p-3 text-left transition ${
+                className={`cursor-pointer border-2 border-ink p-3 text-left shadow-[2px_2px_0_rgb(15_31_20/0.18)] ${
                   resolution === option.value
-                    ? "border-[#8f6bb0] bg-[#f4eefa]"
-                    : "border-line bg-surface hover:border-[#c9a7d8]"
+                    ? "bg-leaf-100 text-ink"
+                    : "bg-paper text-ink hover:bg-leaf-50"
                 }`}
               >
                 <span className="block text-sm font-semibold text-ink">{option.title}</span>
-                <span className="mt-0.5 block text-[11px] leading-relaxed text-muted">{option.description}</span>
+                <span className="mt-1 block text-xs leading-relaxed text-ink-soft">
+                  {option.description}
+                </span>
               </button>
             ))}
           </div>
         </div>
 
-        <Field label="Reason (required)" htmlFor="resolve-reason" required hint="Explain how you established the outcome; this is written to history.">
+        <Field
+          label="Reason"
+          htmlFor="resolve-reason"
+          required
+          hint="Explain how you established the outcome; this is written to history."
+        >
           <Textarea
             id="resolve-reason"
             value={reason}
@@ -133,13 +156,12 @@ export function ResolveUncertainModal({
           />
         </Field>
 
-        <div className="flex items-start gap-2 rounded-lg border border-[#ead9ab] bg-[#fbf4dd] px-3 py-2 text-[11px] leading-relaxed text-[#5f4810]">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <Callout tone="warning">
           The proposal still requires every required group leader to approve. Submitting is not a
           unilateral override.
-        </div>
+        </Callout>
 
-        <p className="font-mono text-[10px] text-muted">target_execution_id: {executionId}</p>
+        <p className="m-0 font-mono text-xs text-muted">target_execution_id: {executionId}</p>
       </div>
     </Modal>
   );

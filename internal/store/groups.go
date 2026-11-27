@@ -53,6 +53,65 @@ func (s *Store) CreateGroup(ctx context.Context, name, description string) (doma
 	return g, nil
 }
 
+func (s *Store) CreateGroupWithLeader(ctx context.Context, name, description string, leaderID uuid.UUID) (domain.Group, error) {
+	if leaderID == uuid.Nil {
+		return domain.Group{}, ErrInvalidGroupLeader
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("create group with leader begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var leaderUsername string
+	var isPlatformAdmin, isActive bool
+	err = tx.QueryRow(ctx, `
+		select username, is_platform_admin, is_active
+		from users
+		where id = $1`, leaderID).Scan(&leaderUsername, &isPlatformAdmin, &isActive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Group{}, ErrInvalidGroupLeader
+	}
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("validate group leader: %w", err)
+	}
+	if isPlatformAdmin {
+		return domain.Group{}, ErrAdminGroupMember
+	}
+	if !isActive {
+		return domain.Group{}, ErrInvalidGroupLeader
+	}
+
+	g := domain.Group{
+		ID:             uuid.New(),
+		Name:           name,
+		Description:    description,
+		LeaderID:       &leaderID,
+		LeaderUsername: leaderUsername,
+		CreatedAt:      time.Now().UTC(),
+	}
+	_, err = tx.Exec(ctx, `
+		insert into groups (id, name, description, leader_id, created_at)
+		values ($1, $2, $3, $4, $5)`,
+		g.ID, g.Name, g.Description, leaderID, g.CreatedAt)
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("create group: %w", mapWriteError(err))
+	}
+
+	_, err = tx.Exec(ctx, `
+		insert into group_members (group_id, user_id)
+		values ($1, $2)
+		on conflict do nothing`, g.ID, leaderID)
+	if err != nil {
+		return domain.Group{}, fmt.Errorf("add leader member: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Group{}, fmt.Errorf("create group with leader commit: %w", err)
+	}
+	return g, nil
+}
+
 func (s *Store) UpdateGroup(ctx context.Context, id uuid.UUID, name, description string) (domain.Group, error) {
 	var r groupRow
 	err := s.pool.QueryRow(ctx, `
@@ -146,12 +205,21 @@ func (s *Store) SetGroupLeader(ctx context.Context, groupID uuid.UUID, leaderID 
 
 	var leaderArg any
 	if leaderID != nil && *leaderID != uuid.Nil {
+		var isAdmin bool
+		err = tx.QueryRow(ctx, `
+			select coalesce((select is_platform_admin from users where id = $1), false)`, *leaderID).Scan(&isAdmin)
+		if err != nil {
+			return domain.Group{}, fmt.Errorf("check leader admin: %w", err)
+		}
+		if isAdmin {
+			return domain.Group{}, ErrAdminGroupMember
+		}
 		var validLeader bool
 		err = tx.QueryRow(ctx, `
 			select exists (
 				select 1 from group_members gm
 				join users u on u.id = gm.user_id
-				where gm.group_id = $1 and gm.user_id = $2 and u.is_active = true
+				where gm.group_id = $1 and gm.user_id = $2 and u.is_active = true and u.is_platform_admin = false
 			)`, groupID, *leaderID).Scan(&validLeader)
 		if err != nil {
 			return domain.Group{}, fmt.Errorf("validate group leader: %w", err)

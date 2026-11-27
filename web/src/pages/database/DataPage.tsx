@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Search, Table2 } from "lucide-react";
+import { Search, Table2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import { databaseApi } from "../../api/endpoints";
+import type { SchemaTable } from "../../api/types";
 import {
   Callout,
   EmptyState,
@@ -17,9 +18,16 @@ import {
 } from "../../components/ui";
 import { cellValue, formatNumber } from "../../lib/format";
 
+function tableKey(entry: Pick<SchemaTable, "schema" | "name">): string {
+  return `${entry.schema}.${entry.name}`;
+}
+
 export default function DataPage() {
   const { dbId = "" } = useParams();
-  const [table, setTable] = useState("");
+  const [searchParams] = useSearchParams();
+  const requestedTable = searchParams.get("table") ?? "";
+
+  const [selectedKey, setSelectedKey] = useState(requestedTable);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [searchInput, setSearchInput] = useState("");
@@ -34,27 +42,39 @@ export default function DataPage() {
   const tables = schemaQuery.data?.tables ?? [];
 
   useEffect(() => {
-    if (!table && tables.length > 0) {
-      setTable(tables[0].name);
-    }
-  }, [table, tables]);
-
-  useEffect(() => {
-    setTable("");
+    setSelectedKey(requestedTable);
     setPage(1);
     setSearch("");
     setSearchInput("");
-  }, [dbId]);
+  }, [dbId, requestedTable]);
+
+  const activeTable =
+    tables.find((t) => tableKey(t) === selectedKey || t.name === selectedKey) ??
+    tables.find((t) => t.can_select !== false) ??
+    tables[0];
+
+  const activeSchema = activeTable?.schema ?? "public";
+  const activeTableName = activeTable?.name ?? "";
+  const activeKey = activeTable ? tableKey(activeTable) : "";
 
   const dataQuery = useQuery({
-    queryKey: ["database", dbId, "data", table, page, pageSize, search],
-    queryFn: () => databaseApi.data(dbId, { table, page, page_size: pageSize, q: search || undefined }),
-    enabled: Boolean(dbId && table),
+    queryKey: ["database", dbId, "data", activeSchema, activeTableName, page, pageSize, search],
+    queryFn: () =>
+      databaseApi.data(dbId, {
+        schema: activeSchema,
+        table: activeTableName,
+        page,
+        page_size: pageSize,
+        q: search || undefined,
+      }),
+    enabled: Boolean(dbId && activeTableName),
   });
 
   const data = dataQuery.data;
   const visibleRows = search
-    ? (data?.rows ?? []).filter((row) => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
+    ? (data?.rows ?? []).filter((row) =>
+        JSON.stringify(row).toLowerCase().includes(search.toLowerCase()),
+      )
     : (data?.rows ?? []);
 
   const submitSearch = (event: FormEvent) => {
@@ -63,8 +83,8 @@ export default function DataPage() {
     setSearch(searchInput.trim());
   };
 
-  const chooseTable = (name: string) => {
-    setTable(name);
+  const chooseTable = (key: string) => {
+    setSelectedKey(key);
     setPage(1);
     setSearch("");
     setSearchInput("");
@@ -82,63 +102,86 @@ export default function DataPage() {
     return (
       <EmptyState
         icon={Table2}
-        title="No tables to browse"
-        description="The catalog is empty or the connection does not expose any table to this role."
+        title="No tables yet"
+        description="There are no tables to show."
       />
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="card p-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+      <div className="card p-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:flex lg:items-end">
           <div className="lg:w-72">
-            <label className="label" htmlFor="data-table">Table</label>
-            <Select id="data-table" value={table} onChange={(event) => chooseTable(event.target.value)}>
-              {tables.map((entry) => (
-                <option key={entry.name} value={entry.name}>
-                  {entry.schema}.{entry.name}
-                </option>
-              ))}
+            <label className="label" htmlFor="data-table">
+              Table
+            </label>
+            <Select
+              id="data-table"
+              value={activeKey}
+              onChange={(event) => chooseTable(event.target.value)}
+            >
+              {tables.map((entry) => {
+                const key = tableKey(entry);
+                return (
+                  <option key={key} value={key}>
+                    {entry.schema}.{entry.name}
+                  </option>
+                );
+              })}
             </Select>
           </div>
-          <form className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end" onSubmit={submitSearch}>
-            <div className="flex-1">
-              <label className="label" htmlFor="data-search">Filter rows</label>
+          <form
+            className="flex flex-1 items-end gap-2 max-lg:order-last md:max-lg:col-span-2"
+            onSubmit={submitSearch}
+          >
+            <div className="min-w-0 flex-1">
+              <label className="label" htmlFor="data-search">
+                Filter rows
+              </label>
               <SearchInput
                 value={searchInput}
                 onChange={setSearchInput}
                 placeholder="Search visible values…"
               />
             </div>
-            <button type="submit" className="btn btn-secondary sm:mb-0">
-              <Search className="h-4 w-4" /> Search
+            <button type="submit" className="btn btn-secondary">
+              <Search className="h-4 w-4" /> <span className="max-[22.5rem]:sr-only">Search</span>
             </button>
           </form>
-          <div className="lg:w-32">
-            <label className="label" htmlFor="data-page-size">Page size</label>
+          <div className="lg:w-40">
+            <label className="label" htmlFor="data-page-size">
+              Show
+            </label>
             <Select
               id="data-page-size"
               value={String(pageSize)}
               onChange={(event) => setPageSize(Number(event.target.value))}
             >
               {[10, 20, 50, 100].map((size) => (
-                <option key={size} value={size}>{size} rows</option>
+                <option key={size} value={size}>
+                  {size} rows per page
+                </option>
               ))}
             </Select>
           </div>
         </div>
       </div>
 
-      <Callout tone="neutral" title={`${formatNumber(data?.total_rows ?? 0)} matching rows`}>
-        Pagination is server-side. Wide tables scroll horizontally inside this card, never the whole
-        page.
-        {search ? (
-          <>
-            {" "}Filter active: <code className="font-mono text-xs">{search}</code>.
-          </>
-        ) : null}
-      </Callout>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="m-0 min-w-0 font-mono text-xl font-semibold break-all text-ink">
+          {activeSchema}.{activeTableName}
+        </h2>
+        <p className="m-0 text-sm text-muted">
+          {formatNumber(data?.total_rows ?? 0)} rows · Data is read only
+        </p>
+      </div>
+
+      {search ? (
+        <Callout tone="info">
+          Filter active: <code className="border border-leaf-200 bg-leaf-100 px-1 font-mono text-xs">{search}</code>
+        </Callout>
+      ) : null}
 
       {dataQuery.isError ? (
         <ErrorBanner error={dataQuery.error} onRetry={() => void dataQuery.refetch()} />
@@ -147,15 +190,20 @@ export default function DataPage() {
       {dataQuery.isLoading && !data ? (
         <PageLoader label="Loading rows" />
       ) : (
-        <div className="table-wrap scrollbar-thin">
-          <table className="table-base min-w-full">
+        <div>
+        <TableWrap>
+          <table className="table-base table-pin min-w-full">
+            <caption id="data-caption">
+              Page {data?.page ?? page}, {visibleRows.length}{" "}
+              {visibleRows.length === 1 ? "row" : "rows"}
+            </caption>
             <thead>
               <tr>
                 {(data?.columns ?? []).map((column) => (
-                  <th key={column.name} className="th whitespace-nowrap">
+                  <th key={column.name} scope="col" className="th th-data whitespace-nowrap">
                     {column.name}
                     {column.data_type ? (
-                      <span className="ml-1.5 font-mono text-[9px] font-normal normal-case text-muted/70">
+                      <span className="ml-2 font-mono text-xs font-normal text-lime">
                         {column.data_type}
                       </span>
                     ) : null}
@@ -165,17 +213,25 @@ export default function DataPage() {
             </thead>
             <tbody>
               {visibleRows.map((row, index) => (
-                <tr key={index} className="tr-hover">
+                <tr key={index}>
                   {(data?.columns ?? []).map((column) => {
                     const value = row[column.name];
                     const isNull = value === null || value === undefined;
+                    const isNum = typeof value === "number";
                     return (
-                      <td key={column.name} className="td max-w-[22rem] truncate font-mono text-xs" title={cellValue(value)}>
+                      <td
+                        key={column.name}
+                        className={`td max-w-[28rem] truncate font-mono text-sm whitespace-nowrap ${
+                          isNum ? "text-right tabular-nums" : ""
+                        }`}
+                        title={cellValue(value)}
+                      >
                         {isNull ? (
-                          <span className="text-muted/50 italic">NULL</span>
-                        ) : typeof value === "boolean" ? (
-                          <span className={`badge ${value ? "badge-success" : "badge-neutral"}`}>
-                            {value ? "true" : "false"}
+                          <span className="text-muted italic">NULL</span>
+                        ) : value === "" ? (
+                          <span className="text-muted italic">
+                            {`''`}
+                            <span className="sr-only"> (empty string)</span>
                           </span>
                         ) : (
                           cellValue(value)
@@ -192,21 +248,18 @@ export default function DataPage() {
               ) : null}
             </tbody>
           </table>
-          {data ? (
+        </TableWrap>
+        {data && data.total_pages > 1 ? (
+          <div className="-mt-0.5 border-x-2 border-b-2 border-ink">
             <Pagination page={data.page} totalPages={data.total_pages} onChange={setPage} />
-          ) : null}
+          </div>
+        ) : null}
         </div>
       )}
 
-      <div className="flex items-center justify-between text-[11px] text-muted">
-        <span>
-          {dataQuery.isFetching ? "Refreshing…" : `Page ${data?.page ?? page} of ${data?.total_pages ?? 1}`}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <ChevronLeft className="h-3 w-3" /> server-side pagination
-          <ChevronRight className="h-3 w-3" />
-        </span>
-      </div>
+      <p className="m-0 text-sm">
+        <Link to={`/databases/${dbId}/schema`}>View table structure</Link>
+      </p>
     </div>
   );
 }

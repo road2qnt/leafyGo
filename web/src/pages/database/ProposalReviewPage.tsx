@@ -1,16 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  GitPullRequest,
-  ShieldCheck,
-  ThumbsDown,
-  ThumbsUp,
-  Undo2,
-  XCircle,
-} from "lucide-react";
+import { ArrowRight, ThumbsDown, ThumbsUp, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 
@@ -23,7 +12,6 @@ import {
   Callout,
   Card,
   CodeBlock,
-  EmptyState,
   ErrorBanner,
   Field,
   KeyValue,
@@ -37,31 +25,18 @@ import {
   Textarea,
 } from "../../components/ui";
 import { useToast } from "../../hooks/useToast";
-import { formatDateTime, formatRelative } from "../../lib/format";
-import { percent } from "../../lib/format";
+import { formatDateTime, formatRelative, percent } from "../../lib/format";
 import { dryRunMeta } from "../../lib/dryRun";
 import { useDatabaseContext } from "./context";
 
 function DecisionBadge({ row }: { row: ApprovalRow }) {
   if (row.decision === "approved") {
-    return (
-      <span className="badge badge-success">
-        <CheckCircle2 className="h-3 w-3" /> Approved
-      </span>
-    );
+    return <span className="badge badge-success">Approved</span>;
   }
   if (row.decision === "rejected") {
-    return (
-      <span className="badge badge-danger">
-        <XCircle className="h-3 w-3" /> Rejected
-      </span>
-    );
+    return <span className="badge badge-danger">Rejected</span>;
   }
-  return (
-    <span className="badge badge-warning">
-      <Clock className="h-3 w-3" /> Pending
-    </span>
-  );
+  return <span className="badge badge-warning">Pending</span>;
 }
 
 export default function ProposalReviewPage() {
@@ -76,7 +51,8 @@ export default function ProposalReviewPage() {
     queryFn: () => migrationApi.proposal(dbId, proposalId),
     refetchInterval: (query) => {
       const status = query.state.data?.proposal.status;
-      return status && ["queued", "running", "partial", "partially_reverted", "uncertain"].includes(status)
+      return status &&
+        ["queued", "running", "partial", "partially_reverted", "uncertain"].includes(status)
         ? 4_000
         : false;
     },
@@ -103,16 +79,20 @@ export default function ProposalReviewPage() {
     setDeciding(kind);
     setDecisionError(null);
     try {
-      const result = kind === "approve"
-        ? await migrationApi.approve(dbId, proposalId, comment)
-        : await migrationApi.reject(dbId, proposalId, comment);
+      const result =
+        kind === "approve"
+          ? await migrationApi.approve(dbId, proposalId, comment)
+          : await migrationApi.reject(dbId, proposalId, comment);
       setComment("");
       await invalidate();
       if (result.job_id) setQueuedJobID(result.job_id);
       if (result.status === "queued") {
         toast.success("Quorum reached", "The job is queued in the per-database FIFO.");
       } else if (result.status === "rejected") {
-        toast.info("Proposal rejected", "The definition stays editable because execution never started.");
+        toast.info(
+          "Proposal rejected",
+          "The definition stays editable because execution never started.",
+        );
       } else {
         toast.success("Decision recorded", "Waiting for the remaining group leaders.");
       }
@@ -142,7 +122,7 @@ export default function ProposalReviewPage() {
     return (
       <div className="space-y-4">
         <Link to={`/databases/${dbId}/migrations`} className="btn btn-ghost btn-sm w-fit">
-          <ArrowLeft className="h-3.5 w-3.5" /> Migrations
+          Migrations
         </Link>
         <ErrorBanner error={detailQuery.error} onRetry={() => void detailQuery.refetch()} />
       </div>
@@ -150,7 +130,9 @@ export default function ProposalReviewPage() {
   }
 
   const { proposal, migration, approvers, can_approve, can_withdraw } = detailQuery.data;
-  const canApprove = can_approve || approvers.some((row) => row.leader_id === user?.id && row.decision === null);
+  const canApprove =
+    can_approve ||
+    approvers.some((row) => row.leader_id === user?.id && row.decision === null);
   const canWithdraw =
     can_withdraw ||
     (proposal.status === "pending_review" && proposal.proposed_by_username === user?.username);
@@ -162,31 +144,41 @@ export default function ProposalReviewPage() {
     success: "badge-success",
     warning: "badge-warning",
     danger: "badge-danger",
-    neutral: "badge-neutral",
+    neutral: "badge-muted",
   }[dryRun.tone];
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-        <Link to={`/databases/${dbId}/migrations`} className="inline-flex items-center gap-1 font-medium text-leaf-700 hover:underline">
-          <ArrowLeft className="h-3.5 w-3.5" /> Migrations
-        </Link>
-        <span>/</span>
-        <span className="font-mono text-[10px]">{proposal.id}</span>
-      </div>
+    <div className="space-y-6">
+      <nav aria-label="Proposal location">
+        <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
+          <li>
+            <Link to={`/databases/${dbId}/migrations`} className="text-leaf-800 hover:text-leaf-900">
+              Migrations & proposals
+            </Link>
+          </li>
+          <li className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted">
+              /
+            </span>
+            <span aria-current="page" className="font-mono font-semibold text-ink-soft">
+              {proposal.id}
+            </span>
+          </li>
+        </ol>
+      </nav>
 
       <PageHeader
-        eyebrow={`Proposal · ${proposal.action_type.replaceAll("_", " ")}`}
         title={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            {proposal.migration_title}
+          <span className="inline-flex flex-wrap items-center gap-3">
+            <span>{proposal.migration_title}</span>
             <StatusBadge status={proposal.status} kind="proposal" />
           </span>
         }
         description={
           <>
             Proposed by <strong>{proposal.proposed_by_username}</strong> · revision{" "}
-            {proposal.migration_revision} · effective slot #{proposal.effective_seq} ·{" "}
+            <span className="font-mono">{proposal.migration_revision}</span> · effective slot{" "}
+            <span className="font-mono">#{proposal.effective_seq}</span> ·{" "}
             {formatRelative(proposal.created_at)}
           </>
         }
@@ -205,9 +197,16 @@ export default function ProposalReviewPage() {
 
       {proposal.dry_run_status === "inconclusive" ? (
         <Callout tone="warning" title="Dry-run was inconclusive">
-          The pre-review dry-run hit <code className="font-mono text-xs">statement_timeout</code> (
-          57014) or <code className="font-mono text-xs">lock_not_available</code> (55P03). That is not
-          a rejection; approvers may continue, but should read the SQL carefully.
+          The pre-review dry-run hit{" "}
+          <code className="border border-leaf-200 bg-leaf-100 px-1 font-mono text-xs">
+            statement_timeout
+          </code>{" "}
+          (57014) or{" "}
+          <code className="border border-leaf-200 bg-leaf-100 px-1 font-mono text-xs">
+            lock_not_available
+          </code>{" "}
+          (55P03). That is not a rejection; approvers may continue, but should inspect the SQL
+          carefully.
         </Callout>
       ) : proposal.dry_run_status === "failed" ? (
         <Callout tone="danger" title="Dry-run failed — approval blocked">
@@ -216,43 +215,73 @@ export default function ProposalReviewPage() {
         </Callout>
       ) : null}
 
-      {proposal.status === "partial" || proposal.status === "partially_reverted" || proposal.status === "uncertain" ? (
-        <Callout tone="plum" title="Database is held by a non-terminal execution">
+      {proposal.status === "partial" ||
+      proposal.status === "partially_reverted" ||
+      proposal.status === "uncertain" ? (
+        <Callout tone="warning" title="Database is held by a non-terminal execution">
           A new migration on this database must wait. Retry/revert from the job monitor, or let the
           automatic evidence re-probe resolve uncertain commits.
         </Callout>
       ) : null}
 
-      {decisionError ? <ErrorBanner error={decisionError} onDismiss={() => setDecisionError(null)} /> : null}
+      {decisionError ? (
+        <ErrorBanner error={decisionError} onDismiss={() => setDecisionError(null)} />
+      ) : null}
 
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-5">
-          <Card className="p-5">
-            <SectionHeader title="Change summary" />
-            <div className="grid gap-4 sm:grid-cols-2">
+      <div className="split-layout min-w-0">
+        <div className="min-w-0 space-y-6">
+          <div className="panel">
+            <div className="panel-header">
+              <h2 className="m-0 text-base font-semibold text-ink">Change summary</h2>
+              <ActionBadge action={proposal.action_type} />
+            </div>
+            <div className="card-pad space-y-4">
               <KeyValue
                 items={[
                   { label: "Action", value: <ActionBadge action={proposal.action_type} /> },
-                  { label: "Mode", value: <span className="badge badge-neutral">{migration.execution_mode}</span> },
-                  { label: "Effective slot", value: <span className="font-mono">#{proposal.effective_seq}</span> },
-                  { label: "Raw sequence", value: <span className="font-mono">#{migration.seq_version}</span> },
-                  { label: "Replaces", value: proposal.replaces_title ?? migration.replaces_title ?? "—" },
-                  { label: "Irreversible", value: migration.is_irreversible ? <span className="badge badge-warning">yes</span> : <span className="badge badge-success">no</span> },
+                  {
+                    label: "Mode",
+                    value: <span className="badge badge-neutral">{migration.execution_mode}</span>,
+                  },
+                  {
+                    label: "Effective slot",
+                    value: <span className="font-mono">#{proposal.effective_seq}</span>,
+                  },
+                  {
+                    label: "Raw sequence",
+                    value: <span className="font-mono">#{migration.seq_version}</span>,
+                  },
+                  {
+                    label: "Replaces",
+                    value: proposal.replaces_title ?? migration.replaces_title ?? "—",
+                  },
+                  {
+                    label: "Irreversible",
+                    value: migration.is_irreversible ? (
+                      <span className="badge badge-warning">yes</span>
+                    ) : (
+                      <span className="badge badge-success">no</span>
+                    ),
+                  },
                 ]}
               />
+              {proposal.reason ? (
+                <Callout tone="neutral" title="Proposer note">
+                  {proposal.reason}
+                </Callout>
+              ) : null}
+              {migration.description ? (
+                <p className="m-0 text-sm leading-relaxed text-ink-soft">{migration.description}</p>
+              ) : null}
             </div>
-            {proposal.reason ? (
-              <Callout tone="neutral" title="Proposer note">
-                {proposal.reason}
-              </Callout>
-            ) : null}
-            {migration.description ? (
-              <p className="mt-3 text-sm leading-relaxed text-muted">{migration.description}</p>
-            ) : null}
-          </Card>
+          </div>
 
-          <div className="grid gap-4 2xl:grid-cols-2">
-            <CodeBlock code={migration.sql_up} label="SQL Up (approved version)" maxHeight="22rem" />
+          <div className="grid gap-6 xl:grid-cols-2">
+            <CodeBlock
+              code={migration.sql_up}
+              label="SQL Up (approved version)"
+              maxHeight="22rem"
+            />
             <CodeBlock
               code={migration.sql_down || "-- irreversible: no down SQL"}
               label="SQL Down"
@@ -260,54 +289,66 @@ export default function ProposalReviewPage() {
             />
           </div>
 
-          <section>
+          <section aria-labelledby="approvals-caption">
             <SectionHeader
               title="Approval matrix"
               description="Snapshot of groups with access when the proposal was submitted."
             />
             <TableWrap>
-              <table className="table-base min-w-[760px]">
+              <table className="table-base table-stack">
+                <caption id="approvals-caption">
+                  {summary.approved} of {summary.required} required leader approvals
+                </caption>
                 <thead>
                   <tr>
-                    <th className="th">Group</th>
-                    <th className="th">Leader</th>
-                    <th className="th">Access</th>
-                    <th className="th">Decision</th>
-                    <th className="th">Comment</th>
-                    <th className="th">Decided</th>
+                    <th scope="col" className="th">Group</th>
+                    <th scope="col" className="th">Leader</th>
+                    <th scope="col" className="th">Access</th>
+                    <th scope="col" className="th">Decision</th>
+                    <th scope="col" className="th">Comment</th>
+                    <th scope="col" className="th">Decided</th>
                   </tr>
                 </thead>
                 <tbody>
                   {approvers.map((row) => (
-                    <tr key={row.group_id} className="tr-hover">
-                      <td className="td text-sm font-medium">{row.group_name}</td>
-                      <td className="td">
-                        <span className="inline-flex items-center gap-1.5 text-sm">
-                          <ShieldCheck className="h-3.5 w-3.5 text-[#6d4b8f]" />
-                          {row.leader_username}
+                    <tr key={row.group_id}>
+                      <th scope="row" data-label="Group" className="td cell-title font-semibold">
+                        {row.group_name}
+                      </th>
+                      <td data-label="Leader" className="td font-semibold text-ink">{row.leader_username}</td>
+                      <td data-label="Access" className="td">
+                        <span
+                          className={`badge ${
+                            row.access_level === "edit" ? "badge-success" : "badge-info"
+                          }`}
+                        >
+                          {row.access_level === "edit" ? "View + Edit" : "View Only"}
                         </span>
                       </td>
-                      <td className="td">
-                        <span className={`badge ${row.access_level === "edit" ? "badge-success" : "badge-info"}`}>
-                          {row.access_level}
-                        </span>
+                      <td data-label="Decision" className="td">
+                        <DecisionBadge row={row} />
                       </td>
-                      <td className="td"><DecisionBadge row={row} /></td>
-                      <td className="td max-w-[18rem] text-xs text-muted">{row.comment || "—"}</td>
-                      <td className="td text-xs text-muted">{formatDateTime(row.decided_at)}</td>
+                      <td data-label="Comment" className="td cell-wide max-w-[18rem] text-sm text-ink-soft">
+                        {row.comment || "—"}
+                      </td>
+                      <td data-label="Decided" className="td text-muted">
+                        {formatDateTime(row.decided_at)}
+                      </td>
                     </tr>
                   ))}
-                  {approvers.length === 0 ? <TableEmpty colSpan={6}>No approver snapshot recorded.</TableEmpty> : null}
+                  {approvers.length === 0 ? (
+                    <TableEmpty colSpan={6}>No approver snapshot recorded.</TableEmpty>
+                  ) : null}
                 </tbody>
               </table>
             </TableWrap>
           </section>
         </div>
 
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
-          <Card className="p-4">
-            <p className="section-title">Quorum</p>
-            <p className="mt-2 text-2xl font-semibold">
+        <aside className="aside-stack lg:sticky lg:top-20 lg:self-start">
+          <Card className="p-4 sm:p-5">
+            <h2 className="section-title">Quorum</h2>
+            <p className="m-0 mt-2 text-2xl font-bold text-ink">
               {summary.approved}
               <span className="text-sm font-normal text-muted"> / {summary.required} approved</span>
             </p>
@@ -318,24 +359,21 @@ export default function ProposalReviewPage() {
                 detail={`${summary.pending} pending`}
               />
             </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
+            <div className="mt-3 flex flex-wrap gap-2">
               <StatusBadge status={proposal.status} kind="proposal" />
               <span className={`badge ${dryRunBadge}`}>{dryRun.label}</span>
             </div>
           </Card>
 
           {reviewOpen ? (
-            <Card className="p-4">
-              <div className="flex items-center gap-2">
-                <GitPullRequest className="h-4 w-4 text-leaf-600" />
-                <p className="text-sm font-semibold">Your decision</p>
-              </div>
+            <Card className="p-4 sm:p-5">
+              <h2 className="section-title mb-2">Your decision</h2>
               {canApprove ? (
                 <>
-                  <p className="mt-1 text-xs leading-relaxed text-muted">
+                  <p className="m-0 text-sm leading-relaxed text-ink-soft">
                     You lead a required group. Comments are written to the immutable approval row.
                   </p>
-                  <Field label="Comment (optional)" htmlFor="decision-comment" className="mt-3">
+                  <Field label="Comment" htmlFor="decision-comment" className="mt-3">
                     <Textarea
                       id="decision-comment"
                       value={comment}
@@ -344,7 +382,7 @@ export default function ProposalReviewPage() {
                       className="min-h-20"
                     />
                   </Field>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="mt-4 grid grid-cols-2 gap-2">
                     <Button
                       variant="danger"
                       onClick={() => void decide("reject")}
@@ -362,28 +400,25 @@ export default function ProposalReviewPage() {
                       <ThumbsUp className="h-4 w-4" /> Approve
                     </Button>
                   </div>
-                  {deciding === "approve" ? (
-                    <p className="mt-2 text-[10px] leading-relaxed text-muted">
-                      The last approval checks the predecessor gate. If the predecessor is not ready,
-                      the approval is rolled back and the proposal stays pending.
-                    </p>
-                  ) : null}
                 </>
               ) : (
                 <Callout tone="neutral" title="Not your action">
                   {canEdit
                     ? "Only the leader of a required group can approve or reject. Membership in the group is not enough."
-                    : "You have View access. Approval requires being the leader of a required group."}
+                    : "You have View Only access. Approval requires being the leader of a required group."}
                 </Callout>
               )}
             </Card>
           ) : (
-            <Card className="p-4">
-              <p className="section-title">Workflow state</p>
-              <p className="mt-1 text-sm leading-relaxed text-muted">
+            <Card className="p-4 sm:p-5">
+              <h2 className="section-title">Workflow state</h2>
+              <p className="m-0 mt-2 text-sm leading-relaxed text-ink-soft">
                 This proposal is <strong>{proposal.status.replaceAll("_", " ")}</strong>.{" "}
                 {activeJobId ? (
-                  <Link to={`/databases/${dbId}/jobs/${activeJobId}`} className="font-medium text-leaf-700 underline">
+                  <Link
+                    to={`/databases/${dbId}/jobs/${activeJobId}`}
+                    className="font-semibold text-leaf-800 underline"
+                  >
                     Open the job monitor
                   </Link>
                 ) : proposal.status === "rejected" || proposal.status === "withdrawn" ? (
@@ -393,53 +428,35 @@ export default function ProposalReviewPage() {
             </Card>
           )}
 
-          <Card className="p-4">
-            <p className="section-title">Audit</p>
-            <dl className="mt-3 space-y-2 text-xs">
+          <Card className="p-4 sm:p-5">
+            <h2 className="section-title">Audit</h2>
+            <dl className="m-0 mt-3 grid gap-2 text-sm">
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Proposal</dt>
-                <dd className="font-mono text-[10px]">{proposal.id}</dd>
+                <dt className="font-semibold text-ink-soft">Proposal</dt>
+                <dd className="m-0 min-w-0 font-mono text-xs break-all">{proposal.id}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Migration</dt>
-                <dd className="font-mono text-[10px]">{proposal.migration_id}</dd>
+                <dt className="font-semibold text-ink-soft">Migration</dt>
+                <dd className="m-0 min-w-0 font-mono text-xs break-all">{proposal.migration_id}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Created</dt>
-                <dd>{formatDateTime(proposal.created_at)}</dd>
+                <dt className="font-semibold text-ink-soft">Created</dt>
+                <dd className="m-0">{formatDateTime(proposal.created_at)}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Updated</dt>
-                <dd>{formatDateTime(proposal.updated_at)}</dd>
+                <dt className="font-semibold text-ink-soft">Updated</dt>
+                <dd className="m-0">{formatDateTime(proposal.updated_at)}</dd>
               </div>
               {migration.replaces_migration_id ? (
                 <div className="flex justify-between gap-2">
-                  <dt className="text-muted">Replaces ID</dt>
-                  <dd className="font-mono text-[10px]">{migration.replaces_migration_id}</dd>
+                  <dt className="font-semibold text-ink-soft">Replaces ID</dt>
+                  <dd className="m-0 min-w-0 font-mono text-xs break-all">{migration.replaces_migration_id}</dd>
                 </div>
               ) : null}
             </dl>
           </Card>
-
-          <Card className="p-4">
-            <p className="section-title">Reviewer checklist</p>
-            <ul className="mt-2 space-y-2 text-[11px] leading-relaxed text-muted">
-              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-leaf-600" /> SQL Up and Down use the same cursor scope in batch mode.</li>
-              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-leaf-600" /> The change is additive, or the rollback restores the previous value.</li>
-              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-leaf-600" /> effective_seq respects predecessor order.</li>
-              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-leaf-600" /> Approver snapshot matches the currently active groups.</li>
-            </ul>
-          </Card>
         </aside>
       </div>
-
-      {!canEdit ? (
-        <EmptyState
-          icon={ShieldCheck}
-          title="Read-only review"
-          description="You can inspect SQL and approvals. Submitting decisions requires being the leader of a required group."
-        />
-      ) : null}
     </div>
   );
 }

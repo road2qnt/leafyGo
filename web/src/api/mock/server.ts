@@ -600,7 +600,16 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
       if (parts.length === 2 && method === "GET") return ok({ groups: state.groups });
       if (parts.length === 2 && method === "POST") {
         const name = String(body.name ?? "").trim();
+        const leaderId = String(body.leader_id ?? "").trim();
         if (name.length < 2) mockError(422, "INVALID_GROUP", "Group name is required.");
+        if (!leaderId) mockError(422, "INVALID_LEADER", "Group leader is required.");
+        const leader = state.users.find((entry) => entry.id === leaderId);
+        if (!leader || !leader.is_active) {
+          mockError(422, "INVALID_LEADER", "Group leader must be an active non-admin user.");
+        }
+        if (leader.is_platform_admin) {
+          mockError(422, "ADMIN_GROUP_MEMBER", "Platform Admins cannot join or lead groups.");
+        }
         if (state.groups.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) {
           mockError(409, "GROUP_NAME_TAKEN", "A group with that name already exists.");
         }
@@ -608,9 +617,9 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
           id: id("g"),
           name,
           description: String(body.description ?? ""),
-          leader_id: null,
-          leader_username: null,
-          members: [],
+          leader_id: leader.id,
+          leader_username: leader.username,
+          members: [{ id: leader.id, username: leader.username }],
           access: [],
           created_at: nowIso(),
         };
@@ -619,6 +628,9 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
       }
       const group = state.groups.find((entry) => entry.id === parts[2]);
       if (!group) mockError(404, "GROUP_NOT_FOUND", "Group not found.");
+      if (parts.length === 3 && method === "GET") {
+        return ok(group);
+      }
       if (parts.length === 3 && method === "PUT") {
         if (String(body.name ?? "").trim()) group.name = String(body.name).trim();
         group.description = String(body.description ?? "");
@@ -639,7 +651,7 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
       }
       if (parts[3] === "members" && method === "POST") {
         const userId = String(body.user_id ?? "");
-        const user = state.users.find((entry) => entry.id === userId && entry.is_active);
+        const user = state.users.find((entry) => entry.id === userId);
         if (!user) mockError(404, "USER_NOT_FOUND", "User not found.");
         if (user.is_platform_admin) mockError(422, "ADMIN_GROUP_MEMBER", "Platform Admins cannot join groups.");
         if (!group.members.some((member) => member.id === user.id)) {
@@ -648,11 +660,10 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
         return ok(group);
       }
       if (parts[3] === "members" && method === "DELETE" && parts[4]) {
-        group.members = group.members.filter((member) => member.id !== parts[4]);
         if (group.leader_id === parts[4]) {
-          group.leader_id = null;
-          group.leader_username = null;
+          mockError(422, "CANNOT_REMOVE_LEADER", "Cannot remove the current group leader. Assign a different leader first.");
         }
+        group.members = group.members.filter((member) => member.id !== parts[4]);
         return ok(group);
       }
       if (parts[3] === "access" && method === "POST") {
@@ -670,32 +681,35 @@ async function handle(method: string, path: string, search: URLSearchParams, bod
         return ok(group);
       }
       if (parts[3] === "leader" && method === "PUT") {
-        const leaderId = body.leader_id as string | null;
-        if (leaderId) {
-          const leader = state.users.find((entry) => entry.id === leaderId && entry.is_active);
-          if (!leader) mockError(422, "INVALID_LEADER", "Choose an active user as the group leader.");
-          if (!group.members.some((member) => member.id === leaderId)) {
-            mockError(422, "LEADER_NOT_MEMBER", "The leader must be a member of the group.");
-          }
-          group.leader_id = leader.id;
-          group.leader_username = leader.username;
-        } else {
-          group.leader_id = null;
-          group.leader_username = null;
+        const leaderId = typeof body.leader_id === "string" ? body.leader_id.trim() : "";
+        if (!leaderId) {
+          mockError(422, "INVALID_LEADER", "Group leader is required.");
         }
+        const leader = state.users.find((entry) => entry.id === leaderId && entry.is_active);
+        if (!leader) mockError(422, "INVALID_LEADER", "Choose an active user as the group leader.");
+        if (leader.is_platform_admin) {
+          mockError(422, "ADMIN_GROUP_MEMBER", "Platform Admins cannot join or lead groups.");
+        }
+        if (!group.members.some((member) => member.id === leaderId)) {
+          mockError(422, "LEADER_NOT_MEMBER", "The leader must be a member of the group.");
+        }
+        group.leader_id = leader.id;
+        group.leader_username = leader.username;
         return ok(group);
       }
       if (parts[3] === "members" && method === "PUT") {
         const ids = (body.user_ids as string[]) ?? [];
-        const members = ids
+        const resolved = ids
           .map((userId) => state.users.find((entry) => entry.id === userId))
-          .filter((entry): entry is User => Boolean(entry))
-          .map((entry) => ({ id: entry.id, username: entry.username }));
-        group.members = members;
-        if (group.leader_id && !members.some((member) => member.id === group.leader_id)) {
-          group.leader_id = null;
-          group.leader_username = null;
+          .filter((entry): entry is User => Boolean(entry));
+        if (resolved.some((entry) => entry.is_platform_admin)) {
+          mockError(422, "ADMIN_GROUP_MEMBER", "Platform Admins cannot join groups.");
         }
+        const members = resolved.map((entry) => ({ id: entry.id, username: entry.username }));
+        if (group.leader_id && !members.some((member) => member.id === group.leader_id)) {
+          mockError(422, "CANNOT_REMOVE_LEADER", "The group leader must remain a member of the group.");
+        }
+        group.members = members;
         return ok(group);
       }
       if (parts[3] === "access" && method === "PUT") {

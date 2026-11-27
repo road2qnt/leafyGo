@@ -1,209 +1,43 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Pencil, Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 import { isApiError } from "../../api/client";
 import { adminApi } from "../../api/endpoints";
-import type { Database, Group, User } from "../../api/types";
+import type { Group } from "../../api/types";
 import {
   Button,
-  CheckboxRow,
-  ConfirmDialog,
+  EmptyState,
   ErrorBanner,
   Field,
-  Modal,
   OptionalTag,
   PageHeader,
   PageLoader,
   Select,
-  TableEmpty,
   TableWrap,
   Textarea,
   TextInput,
 } from "../../components/ui";
 import { useToast } from "../../hooks/useToast";
-import { formatDateTime } from "../../lib/format";
 
-type GrantValue = "none" | "view" | "edit";
-
-export default function GroupsPage() {
-  const queryClient = useQueryClient();
-  const toast = useToast();
-
+function GroupsListView() {
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.groups });
-  const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: adminApi.users });
-  const databasesQuery = useQuery({ queryKey: ["admin", "databases"], queryFn: adminApi.databases });
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [createDescription, setCreateDescription] = useState("");
-  const [createError, setCreateError] = useState<unknown>(null);
-  const [creating, setCreating] = useState(false);
-
-  const [editing, setEditing] = useState<Group | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [leaderId, setLeaderId] = useState("");
-  const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
-  const [grants, setGrants] = useState<Record<string, GrantValue>>({});
-  const [editError, setEditError] = useState<unknown>(null);
-  const [saving, setSaving] = useState(false);
-
-  const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
-  const [deleteError, setDeleteError] = useState<unknown>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const groups = groupsQuery.data?.groups ?? [];
-  const users = usersQuery.data?.users ?? [];
-  const databases = databasesQuery.data?.databases ?? [];
-
-  const invalidate = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["admin", "groups"] }),
-      queryClient.invalidateQueries({ queryKey: ["databases"] }),
-    ]);
-  };
-
-  const openCreate = () => {
-    setCreateName("");
-    setCreateDescription("");
-    setCreateError(null);
-    setCreateOpen(true);
-  };
-
-  const createGroup = async (event: FormEvent) => {
-    event.preventDefault();
-    setCreating(true);
-    setCreateError(null);
-    try {
-      const group = await adminApi.createGroup({ name: createName.trim(), description: createDescription });
-      toast.success("Group created", "Add members, a leader, and database access next.");
-      setCreateOpen(false);
-      await invalidate();
-      openEdit(group);
-    } catch (error) {
-      setCreateError(error);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const openEdit = (group: Group) => {
-    setEditing(group);
-    setEditName(group.name);
-    setEditDescription(group.description);
-    setLeaderId(group.leader_id ?? "");
-    setMemberIds(new Set(group.members.map((member) => member.id)));
-    const nextGrants: Record<string, GrantValue> = {};
-    for (const database of databases) nextGrants[database.id] = "none";
-    for (const grant of group.access) nextGrants[grant.db_id] = grant.level;
-    setGrants(nextGrants);
-    setEditError(null);
-  };
-
-  const toggleMember = (userId: string, checked: boolean) => {
-    setMemberIds((current) => {
-      const next = new Set(current);
-      if (checked) next.add(userId);
-      else {
-        next.delete(userId);
-        if (leaderId === userId) setLeaderId("");
-      }
-      return next;
-    });
-  };
-
-  const saveEdit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!editing) return;
-    setSaving(true);
-    setEditError(null);
-    try {
-      const ids = Array.from(memberIds);
-      if (leaderId && !ids.includes(leaderId)) ids.push(leaderId);
-      await adminApi.updateGroup(editing.id, { name: editName.trim(), description: editDescription });
-      await adminApi.setMembers(editing.id, ids);
-      await adminApi.setLeader(editing.id, leaderId || null);
-      await adminApi.setAccess(
-        editing.id,
-        Object.entries(grants)
-          .filter(([, value]) => value !== "none")
-          .map(([dbId, value]) => ({ db_id: dbId, level: value as "view" | "edit" })),
-      );
-      toast.success("Group saved", "Leader, members, and access grants are up to date.");
-      setEditing(null);
-      await invalidate();
-    } catch (error) {
-      setEditError(error);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await adminApi.deleteGroup(deleteTarget.id);
-      toast.success("Group deleted", `${deleteTarget.name} had no approval history.`);
-      setDeleteTarget(null);
-      await invalidate();
-    } catch (error) {
-      setDeleteError(error);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const deactivateInstead = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await adminApi.deactivateGroup(deleteTarget.id);
-      toast.success("Group deactivated", "Access and leadership were cleared; history is preserved.");
-      setDeleteTarget(null);
-      await invalidate();
-    } catch (error) {
-      setDeleteError(error);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const deactivateFromEditor = async () => {
-    if (!editing) return;
-    setSaving(true);
-    setEditError(null);
-    try {
-      await adminApi.deactivateGroup(editing.id);
-      toast.success("Group deactivated", `${editing.name} no longer participates in approvals.`);
-      setEditing(null);
-      await invalidate();
-    } catch (error) {
-      setEditError(error);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   if (groupsQuery.isLoading) return <PageLoader label="Loading groups" />;
 
-  const editMembers = users.filter(
-    (user) => user.is_active || memberIds.has(user.id),
-  );
+  const groups = groupsQuery.data?.groups ?? [];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Administration"
-        title="Groups & access"
-        description="Every database approval requires its group leaders. Grants are View or View + Edit, and a leader must be a member."
+        title="Groups and access"
         actions={
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New group
-          </Button>
+          groups.length > 0 ? (
+            <Link to="/admin/groups/new" className="btn btn-primary">
+              <Plus className="h-4 w-4" /> Create group
+            </Link>
+          ) : null
         }
       />
 
@@ -211,296 +45,888 @@ export default function GroupsPage() {
         <ErrorBanner error={groupsQuery.error} onRetry={() => void groupsQuery.refetch()} />
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {groups.map((group) => (
-          <div key={group.id} className="card flex flex-col p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-leaf-50 text-leaf-700">
-                  <UsersRound className="h-5 w-5" />
-                </span>
-                <div className="min-w-0">
-                  <h2 className="truncate text-sm font-semibold text-ink">{group.name}</h2>
-                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted">
-                    {group.description || "No description."}
-                  </p>
-                </div>
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <Button variant="ghost" size="sm" onClick={() => openEdit(group)}>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-[#8b3323] hover:bg-[#fbebe6]"
-                  aria-label={`Delete group ${group.name}`}
-                  onClick={() => { setDeleteTarget(group); setDeleteError(null); }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
+      <section aria-labelledby="groups-caption">
+        {groups.length > 0 ? (
+          <TableWrap>
+            <table className="table-base table-stack">
+              <caption id="groups-caption">
+                {groups.length} {groups.length === 1 ? "group" : "groups"}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col" className="th">Group</th>
+                  <th scope="col" className="th">Leader</th>
+                  <th scope="col" className="th">Members</th>
+                  <th scope="col" className="th">Database access</th>
+                  <th scope="col" className="th text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((group) => {
+                  const editDbs = group.access.filter((g) => g.level === "edit");
+                  const viewDbs = group.access.filter((g) => g.level === "view");
+                  return (
+                    <tr key={group.id}>
+                      <th scope="row" data-label="Group" className="td cell-title col-main">
+                        <div>
+                          <Link
+                            to={`/admin/groups/${group.id}`}
+                            className="font-semibold text-leaf-800 hover:text-leaf-900"
+                          >
+                            {group.name}
+                          </Link>
+                          {group.description ? (
+                            <span className="mt-1 block text-xs font-normal text-muted">
+                              {group.description}
+                            </span>
+                          ) : null}
+                        </div>
+                      </th>
+                      <td data-label="Leader" className="td">
+                        {group.leader_username ? (
+                          <span className="badge badge-success">{group.leader_username}</span>
+                        ) : (
+                          <span className="badge badge-danger">No leader</span>
+                        )}
+                      </td>
+                      <td
+                        data-label="Members"
+                        className="td cell-wide max-w-64 truncate"
+                        title={group.members.map((m) => m.username).join(", ")}
+                      >
+                        {group.members.length > 0 ? (
+                          group.members.map((m) => m.username).join(", ")
+                        ) : (
+                          <span className="text-muted">None</span>
+                        )}
+                      </td>
+                      <td data-label="Database access" className="td cell-wide">
+                        {group.access.length > 0 ? (
+                          <dl className="m-0 space-y-1.5">
+                            {editDbs.length > 0 ? (
+                              <div>
+                                <dt className="text-xs font-semibold tracking-wider text-muted uppercase">
+                                  View + Edit
+                                </dt>
+                                <dd className="m-0 text-sm text-ink">
+                                  {editDbs.map((g) => g.db_name).join(", ")}
+                                </dd>
+                              </div>
+                            ) : null}
+                            {viewDbs.length > 0 ? (
+                              <div>
+                                <dt className="text-xs font-semibold tracking-wider text-muted uppercase">
+                                  View Only
+                                </dt>
+                                <dd className="m-0 text-sm text-ink">
+                                  {viewDbs.map((g) => g.db_name).join(", ")}
+                                </dd>
+                              </div>
+                            ) : null}
+                          </dl>
+                        ) : (
+                          <span className="text-muted">None</span>
+                        )}
+                      </td>
+                      <td data-label="Actions" className="td cell-actions text-right whitespace-nowrap">
+                        <Link
+                          to={`/admin/groups/${group.id}`}
+                          className="btn btn-sm"
+                        >
+                          Manage<span className="sr-only"> {group.name}</span>
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+        ) : (
+          <EmptyState
+            title="No groups yet"
+            description="Create a group, add members, then grant it database access."
+            action={
+              <Link to="/admin/groups/new" className="btn btn-primary">
+                <Plus className="h-4 w-4" /> Create group
+              </Link>
+            }
+          />
+        )}
+      </section>
+    </div>
+  );
+}
 
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-              {group.leader_username ? (
-                <span className="badge badge-plum">
-                  <ShieldCheck className="h-3 w-3" /> Leader: {group.leader_username}
-                </span>
-              ) : (
-                <span className="badge badge-danger">No leader</span>
-              )}
-              <span className="badge badge-neutral">{group.members.length} members</span>
-              <span className="badge badge-neutral">{group.access.length} grants</span>
-            </div>
+function GroupCreateView() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
 
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {group.access.map((grant) => (
-                <span
-                  key={grant.db_id}
-                  className={`badge ${grant.level === "edit" ? "badge-success" : "badge-info"}`}
-                >
-                  {grant.db_name} · {grant.level === "edit" ? "edit" : "view"}
-                </span>
-              ))}
-              {group.access.length === 0 ? (
-                <span className="text-[11px] text-muted">No database grants yet.</span>
-              ) : null}
-            </div>
+  const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: adminApi.users });
+  const eligibleLeaders = useMemo(
+    () => (usersQuery.data?.users ?? []).filter((u) => !u.is_platform_admin && u.is_active),
+    [usersQuery.data],
+  );
 
-            <p className="mt-auto pt-4 text-[10px] text-muted">Created {formatDateTime(group.created_at)}</p>
-          </div>
-        ))}
-      </div>
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [leaderId, setLeaderId] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [creating, setCreating] = useState(false);
 
-      {groups.length === 0 ? (
-        <div className="card p-8 text-center text-sm text-muted">
-          No groups yet. Create one, then assign a leader and grant database access.
-        </div>
-      ) : null}
+  useEffect(() => {
+    if (!leaderId && eligibleLeaders.length > 0) {
+      setLeaderId(eligibleLeaders[0].id);
+    }
+  }, [leaderId, eligibleLeaders]);
 
-      {!usersQuery.isLoading && users.length === 0 ? (
-        <ErrorBanner error={new Error("Create at least one user before assigning group leaders.")} />
-      ) : null}
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setCreating(true);
+    setError(null);
+    try {
+      const group = await adminApi.createGroup({
+        name: name.trim(),
+        description,
+        leader_id: leaderId,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
+      toast.success("Group created", "Add members and grant database access.");
+      navigate(`/admin/groups/${group.id}`);
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setCreating(false);
+    }
+  };
 
-      <Modal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="Create group"
-        description="A group becomes an approver when it has access to the target database."
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={creating}>
-              Cancel
-            </Button>
-            <Button type="submit" form="create-group-form" loading={creating}>
-              Create group
-            </Button>
-          </>
-        }
-      >
-        <form id="create-group-form" className="space-y-4" onSubmit={createGroup}>
-          {createError ? <ErrorBanner error={createError} /> : null}
-          <Field label="Group name" htmlFor="group-name" required>
+  if (usersQuery.isLoading) return <PageLoader label="Loading users" />;
+
+  return (
+    <div className="space-y-6">
+      <nav aria-label="Breadcrumb">
+        <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
+          <li>
+            <Link to="/admin/groups" className="text-leaf-800 hover:text-leaf-900">
+              Groups
+            </Link>
+          </li>
+          <li className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted">
+              /
+            </span>
+            <span aria-current="page" className="font-semibold text-ink-soft">
+              New group
+            </span>
+          </li>
+        </ol>
+      </nav>
+
+      <PageHeader title="Create group" />
+
+      <section className="card card-pad space-y-4" aria-labelledby="group-form-title">
+        <h2 id="group-form-title" className="section-title">
+          Details
+        </h2>
+        {error ? <ErrorBanner error={error} /> : null}
+        {eligibleLeaders.length === 0 ? (
+          <ErrorBanner
+            error={
+              new Error(
+                "Create at least one active non-admin user before creating a group (a group requires a leader).",
+              )
+            }
+          />
+        ) : null}
+
+        <form className="grid gap-4" onSubmit={submit}>
+          <Field label="Group name" htmlFor="f-group-name" required>
             <TextInput
-              id="group-name"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
+              id="f-group-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="off"
               required
               autoFocus
             />
           </Field>
-          <Field label="Description" htmlFor="group-description">
+
+          <Field
+            label="Group leader"
+            htmlFor="f-group-leader"
+            required
+            hint="The leader is automatically added as the first member and approves proposals for this group."
+          >
+            <Select
+              id="f-group-leader"
+              value={leaderId}
+              onChange={(event) => setLeaderId(event.target.value)}
+              required
+            >
+              <option value="">Choose a leader</option>
+              {eligibleLeaders.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.username}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Description" htmlFor="f-group-description">
             <Textarea
-              id="group-description"
-              value={createDescription}
-              onChange={(event) => setCreateDescription(event.target.value)}
-              placeholder="What does this group own?"
+              id="f-group-description"
+              rows={2}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className="min-h-20"
             />
           </Field>
-        </form>
-      </Modal>
 
-      <Modal
-        open={editing !== null}
-        onClose={() => setEditing(null)}
-        title={`Edit · ${editing?.name ?? "group"}`}
-        description="Leader, membership, and access are snapshotted when a proposal is submitted."
-        size="lg"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setEditing(null)} disabled={saving}>
+          <p className="hint m-0">
+            Additional members and database access are added after the group is created.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <Button type="submit" loading={creating} disabled={!leaderId}>
+              Create group
+            </Button>
+            <Link to="/admin/groups" className="btn btn-ghost">
               Cancel
-            </Button>
-            <Button type="submit" form="edit-group-form" loading={saving}>
-              Save group
-            </Button>
-          </>
-        }
-      >
-        {editing ? (
-          <form id="edit-group-form" className="space-y-5" onSubmit={saveEdit}>
-            {editError ? <ErrorBanner error={editError} /> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Group name" htmlFor="edit-group-name" required>
-                <TextInput
-                  id="edit-group-name"
-                  value={editName}
-                  onChange={(event) => setEditName(event.target.value)}
-                  required
-                />
-              </Field>
-              <Field
-                label="Group leader"
-                htmlFor="edit-group-leader"
-                hint="Leaders approve or reject proposals for this group."
-              >
-                <Select
-                  id="edit-group-leader"
-                  value={leaderId}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setLeaderId(value);
-                    if (value) {
-                      setMemberIds((current) => new Set(current).add(value));
-                    }
-                  }}
-                >
-                  <option value="">No leader</option>
-                  {editMembers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.username}
-                      {user.is_active ? "" : " (inactive)"}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <Field label="Description" htmlFor="edit-group-description">
-              <Textarea
-                id="edit-group-description"
-                value={editDescription}
-                onChange={(event) => setEditDescription(event.target.value)}
+            </Link>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function GroupEditView({ groupId }: { groupId: string }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
+
+  const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.groups });
+  const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: adminApi.users });
+  const databasesQuery = useQuery({
+    queryKey: ["admin", "databases"],
+    queryFn: adminApi.databases,
+  });
+
+  const group: Group | null =
+    (groupsQuery.data?.groups ?? []).find((g) => g.id === groupId) ?? null;
+  const users = usersQuery.data?.users ?? [];
+  const databases = databasesQuery.data?.databases ?? [];
+
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [leaderId, setLeaderId] = useState("");
+  const [hydratedId, setHydratedId] = useState<string | null>(null);
+  const [detailsError, setDetailsError] = useState<unknown>(null);
+  const [savingDetails, setSavingDetails] = useState(false);
+
+  const [memberFilter, setMemberFilter] = useState("");
+  const [addMemberUserId, setAddMemberUserId] = useState("");
+  const [memberError, setMemberError] = useState<unknown>(null);
+  const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const [addingMember, setAddingMember] = useState(false);
+
+  const [accessDrafts, setAccessDrafts] = useState<Record<string, "view" | "edit">>({});
+  const [grantDbId, setGrantDbId] = useState("");
+  const [grantLevel, setGrantLevel] = useState<"view" | "edit">("view");
+  const [accessError, setAccessError] = useState<unknown>(null);
+  const [busyAccessDbId, setBusyAccessDbId] = useState<string | null>(null);
+  const [grantingAccess, setGrantingAccess] = useState(false);
+
+  const [deleteError, setDeleteError] = useState<unknown>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (group && hydratedId !== group.id) {
+      setName(group.name);
+      setDescription(group.description);
+      setLeaderId(group.leader_id ?? "");
+      setHydratedId(group.id);
+    }
+  }, [group, hydratedId]);
+
+  useEffect(() => {
+    if (!group) return;
+    const nextDrafts: Record<string, "view" | "edit"> = {};
+    for (const grant of group.access) {
+      nextDrafts[grant.db_id] = grant.level;
+    }
+    setAccessDrafts(nextDrafts);
+  }, [group]);
+
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin", "groups"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
+      queryClient.invalidateQueries({ queryKey: ["databases"] }),
+    ]);
+  };
+
+  if (groupsQuery.isLoading || usersQuery.isLoading || databasesQuery.isLoading) {
+    return <PageLoader label="Loading group" />;
+  }
+
+  if (!group) {
+    return (
+      <div className="space-y-4">
+        <nav aria-label="Breadcrumb">
+          <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
+            <li>
+              <Link to="/admin/groups" className="text-leaf-800 hover:text-leaf-900">
+                Groups
+              </Link>
+            </li>
+          </ol>
+        </nav>
+        <ErrorBanner error={new Error("Group not found.")} />
+      </div>
+    );
+  }
+
+  const memberIdSet = new Set(group.members.map((m) => m.id));
+  const availableUsersToAdd = users.filter(
+    (u) => !u.is_platform_admin && u.is_active && !memberIdSet.has(u.id),
+  );
+  const filteredMembers = group.members.filter((m) =>
+    m.username.toLowerCase().includes(memberFilter.trim().toLowerCase()),
+  );
+
+  const grantedDbIdSet = new Set(group.access.map((a) => a.db_id));
+  const availableDatabasesToGrant = databases.filter((db) => !grantedDbIdSet.has(db.id));
+
+  const saveDetails = async (event: FormEvent) => {
+    event.preventDefault();
+    setSavingDetails(true);
+    setDetailsError(null);
+    try {
+      await adminApi.updateGroup(group.id, {
+        name: name.trim(),
+        description,
+      });
+      if (leaderId && leaderId !== group.leader_id) {
+        await adminApi.setLeader(group.id, leaderId);
+      }
+      await invalidate();
+      toast.success("Details saved", `${name.trim()} was updated.`);
+    } catch (cause) {
+      setDetailsError(cause);
+    } finally {
+      setSavingDetails(false);
+    }
+  };
+
+  const handleAddMember = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!addMemberUserId) return;
+    setAddingMember(true);
+    setMemberError(null);
+    try {
+      await adminApi.addMember(group.id, addMemberUserId);
+      setAddMemberUserId("");
+      await invalidate();
+      toast.success("Member added", "User session will rotate on next request.");
+    } catch (cause) {
+      setMemberError(cause);
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId: string, username: string) => {
+    setBusyMemberId(userId);
+    setMemberError(null);
+    try {
+      await adminApi.removeMember(group.id, userId);
+      await invalidate();
+      toast.success("Member removed", `${username} was removed from ${group.name}.`);
+    } catch (cause) {
+      setMemberError(cause);
+    } finally {
+      setBusyMemberId(null);
+    }
+  };
+
+  const handleUpdateAccess = async (dbId: string, dbName: string) => {
+    const level = accessDrafts[dbId] ?? "view";
+    setBusyAccessDbId(dbId);
+    setAccessError(null);
+    try {
+      await adminApi.setDatabaseAccess(group.id, dbId, level);
+      await invalidate();
+      toast.success(
+        "Access updated",
+        `${dbName} set to ${level === "edit" ? "View + Edit" : "View Only"}.`,
+      );
+    } catch (cause) {
+      setAccessError(cause);
+    } finally {
+      setBusyAccessDbId(null);
+    }
+  };
+
+  const handleRevokeAccess = async (dbId: string, dbName: string) => {
+    setBusyAccessDbId(dbId);
+    setAccessError(null);
+    try {
+      await adminApi.setDatabaseAccess(group.id, dbId, "none");
+      await invalidate();
+      toast.success("Access revoked", `Revoked access on ${dbName}.`);
+    } catch (cause) {
+      setAccessError(cause);
+    } finally {
+      setBusyAccessDbId(null);
+    }
+  };
+
+  const handleGrantAccess = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!grantDbId) return;
+    setGrantingAccess(true);
+    setAccessError(null);
+    try {
+      await adminApi.setDatabaseAccess(group.id, grantDbId, grantLevel);
+      setGrantDbId("");
+      setGrantLevel("view");
+      await invalidate();
+      toast.success("Access granted", "Group members now have access.");
+    } catch (cause) {
+      setAccessError(cause);
+    } finally {
+      setGrantingAccess(false);
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await adminApi.deleteGroup(group.id);
+      await invalidate();
+      toast.success("Group deleted", `${group.name} was deleted.`);
+      navigate("/admin/groups");
+    } catch (cause) {
+      setDeleteError(cause);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeactivateGroup = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await adminApi.deactivateGroup(group.id);
+      await invalidate();
+      toast.success(
+        "Group deactivated",
+        `${group.name} access and leadership were cleared; approval history is preserved.`,
+      );
+      navigate("/admin/groups");
+    } catch (cause) {
+      setDeleteError(cause);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <nav aria-label="Breadcrumb">
+        <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
+          <li>
+            <Link to="/admin/groups" className="text-leaf-800 hover:text-leaf-900">
+              Groups
+            </Link>
+          </li>
+          <li className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted">
+              /
+            </span>
+            <span aria-current="page" className="font-semibold text-ink-soft">
+              {group.name}
+            </span>
+          </li>
+        </ol>
+      </nav>
+
+      <PageHeader title={group.name} description={group.description || undefined} />
+
+      {/* 2-Column Top Grid: Details + Members */}
+      <div className="columns-layout">
+        {/* Card 1: Details */}
+        <section className="card card-pad flex flex-col gap-3" aria-labelledby="details-title">
+          <h2 id="details-title" className="section-title">
+            Details
+          </h2>
+          {detailsError ? <ErrorBanner error={detailsError} /> : null}
+          <form className="grid gap-4" onSubmit={saveDetails}>
+            <Field label="Group name" htmlFor="f-group-name" required>
+              <TextInput
+                id="f-group-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoComplete="off"
+                required
               />
             </Field>
 
-            <div>
-              <p className="label">Members</p>
-              <div className="grid max-h-48 gap-1 overflow-y-auto rounded-lg border border-line bg-[#faf9f4] p-2 sm:grid-cols-2">
-                {editMembers.map((user) => (
-                  <CheckboxRow
-                    key={user.id}
-                    label={
-                      <span className="inline-flex items-center gap-1.5">
-                        {user.username}
-                        {!user.is_active ? <span className="badge badge-danger">Inactive</span> : null}
-                        {user.id === leaderId ? <span className="badge badge-plum">Leader</span> : null}
-                      </span>
-                    }
-                    checked={memberIds.has(user.id)}
-                    onChange={(checked) => toggleMember(user.id, checked)}
-                  />
-                ))}
-                {editMembers.length === 0 ? (
-                  <p className="p-2 text-xs text-muted">No users to add.</p>
-                ) : null}
-              </div>
-            </div>
+            <Field label="Description" htmlFor="f-group-description">
+              <Textarea
+                id="f-group-description"
+                rows={2}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                className="min-h-20"
+              />
+            </Field>
 
-            <div>
-              <p className="label">Database access</p>
-              <div className="overflow-hidden rounded-lg border border-line">
-                <table className="table-base">
-                  <thead>
-                    <tr>
-                      <th className="th">Database</th>
-                      <th className="th w-40">Grant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {databases.map((database: Database) => (
-                      <tr key={database.id}>
-                        <td className="td">
-                          <p className="text-sm">{database.name}</p>
-                          <p className="font-mono text-[10px] text-muted">{database.db_name}</p>
-                        </td>
-                        <td className="td">
-                          <Select
-                            value={grants[database.id] ?? "none"}
-                            onChange={(event) =>
-                              setGrants((current) => ({
-                                ...current,
-                                [database.id]: event.target.value as GrantValue,
-                              }))
-                            }
-                          >
-                            <option value="none">No access</option>
-                            <option value="view">View only</option>
-                            <option value="edit">View + Edit</option>
-                          </Select>
-                        </td>
-                      </tr>
-                    ))}
-                    {databases.length === 0 ? (
-                      <TableEmpty colSpan={2}>No connections registered yet.</TableEmpty>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-dashed border-[#c9a7d8] bg-[#faf5fc] p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <KeyRound className="h-4 w-4 text-[#6d4b8f]" />
-                <p className="text-sm font-semibold text-[#54376f]">Deactivate group</p>
-                <OptionalTag />
-              </div>
-              <p className="mt-1 text-xs leading-relaxed text-[#54376f]/75">
-                Clears access and leadership while preserving approval history. This is the safe
-                fallback when a hard delete returns <code className="font-mono">GROUP_HAS_HISTORY</code>.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                type="button"
-                className="mt-2"
-                onClick={() => void deactivateFromEditor()}
-                disabled={saving}
+            <Field
+              label="Group leader"
+              htmlFor="f-group-leader"
+              required
+              hint="Leaders approve or reject migration proposals for this group. The leader must be a member."
+            >
+              <Select
+                id="f-group-leader"
+                value={leaderId}
+                onChange={(event) => setLeaderId(event.target.value)}
+                required
               >
-                Deactivate this group
+                {!leaderId ? <option value="">Choose a member</option> : null}
+                {group.members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.username}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <div className="pt-2">
+              <Button type="submit" loading={savingDetails}>
+                Save details
               </Button>
             </div>
           </form>
-        ) : null}
-      </Modal>
+        </section>
 
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onClose={() => { setDeleteTarget(null); setDeleteError(null); }}
-        onConfirm={() => void confirmDelete()}
-        title={`Delete ${deleteTarget?.name ?? "group"}?`}
-        description={
-          <div className="space-y-3">
-            <p>
-              Groups with approval history cannot be hard-deleted. The API returns{" "}
-              <code className="font-mono text-xs">GROUP_HAS_HISTORY</code>.
-            </p>
-            {deleteError ? (
-              <>
-                <ErrorBanner error={deleteError} />
+        {/* Card 2: Members */}
+        <section className="card card-pad flex flex-col gap-3" aria-labelledby="members-title">
+          <h2 id="members-title" className="section-title">
+            Members
+          </h2>
+          <p className="hint m-0">
+            Adding or removing a member signs that user out so their new access applies right away.
+          </p>
+          {memberError ? <ErrorBanner error={memberError} /> : null}
+
+          {group.members.length > 0 ? (
+            <>
+              <div className="grid gap-1">
+                <label className="label mb-0" htmlFor="member-filter-input">
+                  Find member
+                </label>
+                <div className="relative flex items-center">
+                  <TextInput
+                    id="member-filter-input"
+                    value={memberFilter}
+                    onChange={(event) => setMemberFilter(event.target.value)}
+                    placeholder="Type to filter members..."
+                    autoComplete="off"
+                    className="pr-9"
+                  />
+                  {memberFilter ? (
+                    <button
+                      type="button"
+                      onClick={() => setMemberFilter("")}
+                      className="absolute right-2 cursor-pointer border-0 bg-transparent p-1 text-lg leading-none text-muted hover:text-ink"
+                      aria-label="Clear member filter"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <TableWrap>
+                <table className="table-base">
+                  <thead>
+                    <tr>
+                      <th scope="col" className="th">Username</th>
+                      <th scope="col" className="th text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMembers.map((member) => {
+                      const isLeader = member.id === group.leader_id;
+                      return (
+                        <tr key={member.id}>
+                          <th scope="row" className="td break-all">
+                            <span className="font-semibold text-ink">{member.username}</span>
+                            {isLeader ? (
+                              <span className="badge badge-success ml-2">Leader</span>
+                            ) : null}
+                          </th>
+                          <td className="td w-[1%] text-right whitespace-nowrap">
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              type="button"
+                              disabled={isLeader}
+                              loading={busyMemberId === member.id}
+                              title={
+                                isLeader
+                                  ? "Assign a different leader in Details before removing this member"
+                                  : undefined
+                              }
+                              aria-label={`Remove ${member.username} from ${group.name}`}
+                              onClick={() => void handleRemoveMember(member.id, member.username)}
+                            >
+                              Remove
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredMembers.length === 0 ? (
+                      <tr>
+                        <td colSpan={2} className="td text-center text-muted">
+                          No matching members.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </TableWrap>
+            </>
+          ) : (
+            <p className="m-0 text-sm text-muted">No members yet.</p>
+          )}
+
+          {availableUsersToAdd.length > 0 ? (
+            <>
+              <form
+                className="flex flex-wrap items-end gap-2 pt-1 max-sm:[&>button]:w-full"
+                onSubmit={handleAddMember}
+              >
+                <div className="min-w-48 flex-1">
+                  <label className="label" htmlFor="add-member-select">
+                    Add member
+                  </label>
+                  <Select
+                    id="add-member-select"
+                    value={addMemberUserId}
+                    onChange={(event) => setAddMemberUserId(event.target.value)}
+                    required
+                  >
+                    <option value="">Search or select user...</option>
+                    {availableUsersToAdd.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.username}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button variant="secondary" type="submit" loading={addingMember}>
+                  Add member
+                </Button>
+              </form>
+              <p className="hint m-0">Platform Admins cannot join groups.</p>
+            </>
+          ) : (
+            <p className="hint m-0">Every eligible user is already a member.</p>
+          )}
+        </section>
+      </div>
+
+      {/* Card 3: Database access */}
+      <section className="card card-pad flex flex-col gap-3" aria-labelledby="access-title">
+        <h2 id="access-title" className="section-title">
+          Database access
+        </h2>
+        <p className="hint m-0">
+          Changing access signs out the group's members so their new access applies right away.
+        </p>
+        {accessError ? <ErrorBanner error={accessError} /> : null}
+
+        {group.access.length > 0 ? (
+          <TableWrap>
+            <table className="table-base table-stack">
+              <thead>
+                <tr>
+                  <th scope="col" className="th">Database</th>
+                  <th scope="col" className="th w-[1%] whitespace-nowrap">Level</th>
+                  <th scope="col" className="th w-[1%] text-right whitespace-nowrap">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.access.map((grant) => {
+                  const draftLevel = accessDrafts[grant.db_id] ?? grant.level;
+                  return (
+                    <tr key={grant.db_id}>
+                      <th scope="row" data-label="Database" className="td cell-title font-semibold text-ink">
+                        {grant.db_name}
+                      </th>
+                      <td data-label="Level" className="td cell-wide w-[1%] whitespace-nowrap">
+                        <div className="inline-flex items-center gap-2">
+                          <label className="sr-only" htmlFor={`lvl-${grant.db_id}`}>
+                            Access level on {grant.db_name}
+                          </label>
+                          <Select
+                            id={`lvl-${grant.db_id}`}
+                            value={draftLevel}
+                            onChange={(event) =>
+                              setAccessDrafts((current) => ({
+                                ...current,
+                                [grant.db_id]: event.target.value as "view" | "edit",
+                              }))
+                            }
+                            className="min-h-[2.25rem] w-auto py-1 pr-9 pl-2.5 text-sm"
+                          >
+                            <option value="view">View Only</option>
+                            <option value="edit">View + Edit</option>
+                          </Select>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            type="button"
+                            loading={busyAccessDbId === grant.db_id}
+                            onClick={() => void handleUpdateAccess(grant.db_id, grant.db_name)}
+                          >
+                            Save<span className="sr-only"> level on {grant.db_name}</span>
+                          </Button>
+                        </div>
+                      </td>
+                      <td data-label="Actions" className="td cell-actions w-[1%] text-right whitespace-nowrap">
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          type="button"
+                          loading={busyAccessDbId === grant.db_id}
+                          onClick={() => void handleRevokeAccess(grant.db_id, grant.db_name)}
+                        >
+                          Revoke<span className="sr-only"> access on {grant.db_name}</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+        ) : (
+          <p className="m-0 text-sm text-muted">No database access yet.</p>
+        )}
+
+        {availableDatabasesToGrant.length > 0 ? (
+          <form className="flex flex-wrap items-end gap-2 pt-1 max-sm:[&>button]:w-full" onSubmit={handleGrantAccess}>
+            <div className="min-w-48 flex-1">
+              <label className="label" htmlFor="grant-db">
+                Grant access to
+              </label>
+              <Select
+                id="grant-db"
+                value={grantDbId}
+                onChange={(event) => setGrantDbId(event.target.value)}
+                required
+              >
+                <option value="">Choose a database</option>
+                {availableDatabasesToGrant.map((db) => (
+                  <option key={db.id} value={db.id}>
+                    {db.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="min-w-48 flex-1">
+              <label className="label" htmlFor="grant-level">
+                Level
+              </label>
+              <Select
+                id="grant-level"
+                value={grantLevel}
+                onChange={(event) => setGrantLevel(event.target.value as "view" | "edit")}
+              >
+                <option value="view">View Only</option>
+                <option value="edit">View + Edit</option>
+              </Select>
+            </div>
+            <Button variant="secondary" type="submit" loading={grantingAccess}>
+              Grant access
+            </Button>
+          </form>
+        ) : group.access.length > 0 ? (
+          <p className="hint m-0">This group already has access to every connection.</p>
+        ) : (
+          <p className="hint m-0">
+            No connections exist yet. <Link to="/admin/databases">Add a connection</Link> first.
+          </p>
+        )}
+      </section>
+
+      {/* Card 4: Delete group (card--danger) */}
+      <section className="card card-danger card-pad flex flex-col gap-3" aria-labelledby="delete-title">
+        <h2 id="delete-title" className="section-title">
+          Delete group
+        </h2>
+        <p className="m-0 text-sm leading-relaxed text-ink">
+          Group <strong>{group.name}</strong> and its memberships and access grants will be deleted.
+          Its members are signed out. The databases themselves are untouched.
+        </p>
+        <div>
+          <details className="group inline-block max-w-full">
+            <summary className="inline-flex min-h-[2.75rem] cursor-pointer list-none items-center gap-2 border-2 border-ink bg-paper px-4 py-2 font-semibold text-crimson shadow-[2px_2px_0_rgb(15_31_20/0.18)] hover:bg-crimson-wash">
+              <Trash2 className="h-4 w-4" aria-hidden />
+              <span>Delete {group.name}</span>
+              <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="mt-2 min-w-[min(18rem,80vw)] space-y-3 border-2 border-ink bg-paper p-3 text-sm">
+              <p className="m-0">This cannot be undone.</p>
+              {deleteError ? <ErrorBanner error={deleteError} /> : null}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  type="button"
+                  loading={deleting}
+                  onClick={() => void handleDeleteGroup()}
+                >
+                  Yes, delete group
+                </Button>
                 {isApiError(deleteError) && deleteError.code === "GROUP_HAS_HISTORY" ? (
-                  <Button variant="secondary" onClick={() => void deactivateInstead()} loading={deleting}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    loading={deleting}
+                    onClick={() => void handleDeactivateGroup()}
+                  >
                     Deactivate group instead <OptionalTag />
                   </Button>
                 ) : null}
-              </>
-            ) : null}
-          </div>
-        }
-        confirmLabel="Delete group"
-        loading={deleting}
-      />
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
     </div>
   );
+}
+
+export default function GroupsPage() {
+  const { groupId } = useParams();
+  const location = useLocation();
+  const isNew = location.pathname.endsWith("/admin/groups/new");
+
+  if (isNew) {
+    return <GroupCreateView />;
+  }
+  if (groupId) {
+    return <GroupEditView groupId={groupId} />;
+  }
+  return <GroupsListView />;
 }

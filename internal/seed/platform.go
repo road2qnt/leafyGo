@@ -125,9 +125,17 @@ func (r *runner) seedPlatform(ctx context.Context, conns []connSeed) (platformRe
 		r.log.Info("created connection", "name", c.Name)
 	}
 
-	// Group yang sudah ada tidak disentuh agar perubahan lewat UI admin bertahan.
+	// Group yang sudah ada tidak disentuh agar perubahan lewat UI admin bertahan,
+	// kecuali jika group belum memiliki leader sama sekali.
 	for _, g := range groupSeeds {
-		if _, err := st.GetGroupByName(ctx, g.Name); err == nil {
+		if existingGroup, err := st.GetGroupByName(ctx, g.Name); err == nil {
+			if existingGroup.LeaderID == nil && len(g.Members) > 0 {
+				leaderID := res.users[g.Members[0]].ID
+				_ = st.AddGroupMember(ctx, existingGroup.ID, leaderID)
+				if _, err := st.SetGroupLeader(ctx, existingGroup.ID, &leaderID); err != nil {
+					return res, fmt.Errorf("backfill leader %s on %s: %w", g.Members[0], g.Name, err)
+				}
+			}
 			continue
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return res, err
@@ -139,6 +147,12 @@ func (r *runner) seedPlatform(ctx context.Context, conns []connSeed) (platformRe
 		for _, m := range g.Members {
 			if err := st.AddGroupMember(ctx, group.ID, res.users[m].ID); err != nil {
 				return res, fmt.Errorf("add %s to %s: %w", m, g.Name, err)
+			}
+		}
+		if len(g.Members) > 0 {
+			leaderID := res.users[g.Members[0]].ID
+			if _, err := st.SetGroupLeader(ctx, group.ID, &leaderID); err != nil {
+				return res, fmt.Errorf("set leader %s on %s: %w", g.Members[0], g.Name, err)
 			}
 		}
 		for name, level := range g.Access {

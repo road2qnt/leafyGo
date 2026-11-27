@@ -381,8 +381,9 @@ func (s *Server) handleAPIAdminGroupGet(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleAPIAdminGroupCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name        string     `json:"name"`
+		Description string     `json:"description"`
+		LeaderID    *uuid.UUID `json:"leader_id"`
 	}
 	if !decodeJSONBody(w, r, &req) {
 		return
@@ -397,16 +398,27 @@ func (s *Server) handleAPIAdminGroupCreate(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Description must be at most 500 characters.")
 		return
 	}
-	g, err := s.store.CreateGroup(r.Context(), name, desc)
-	if errors.Is(err, store.ErrConflict) {
-		writeAPIError(w, r, http.StatusConflict, ErrCodeConflict, "A group with this name already exists.")
+	if req.LeaderID == nil || *req.LeaderID == uuid.Nil {
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Group leader is required.")
 		return
 	}
-	if err != nil {
+	g, err := s.store.CreateGroupWithLeader(r.Context(), name, desc, *req.LeaderID)
+	switch {
+	case errors.Is(err, store.ErrConflict):
+		writeAPIError(w, r, http.StatusConflict, ErrCodeConflict, "A group with this name already exists.")
+		return
+	case errors.Is(err, store.ErrAdminGroupMember):
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Platform Admins cannot join or lead groups.")
+		return
+	case errors.Is(err, store.ErrInvalidGroupLeader):
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Group leader must be an active non-admin user.")
+		return
+	case err != nil:
 		s.logger.Error("api create group", "error", err)
 		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Failed to create group.")
 		return
 	}
+	_ = s.store.MarkUserSessionsForRotation(r.Context(), *req.LeaderID)
 	item, err := s.buildAPIAdminGroup(r.Context(), g)
 	if err != nil {
 		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Failed to load group.")
@@ -471,10 +483,17 @@ func (s *Server) handleAPIAdminGroupLeader(w http.ResponseWriter, r *http.Reques
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
+	if req.LeaderID == nil || *req.LeaderID == uuid.Nil {
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Group leader is required.")
+		return
+	}
 	updated, err := s.store.SetGroupLeader(r.Context(), groupID, req.LeaderID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Group not found.")
+		return
+	case errors.Is(err, store.ErrAdminGroupMember):
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Platform Admins cannot join or lead groups.")
 		return
 	case errors.Is(err, store.ErrInvalidGroupLeader):
 		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Leader must be an active member of this group.")
@@ -553,11 +572,16 @@ func (s *Server) handleAPIAdminGroupRemoveMember(w http.ResponseWriter, r *http.
 		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "User not found.")
 		return
 	}
-	if _, err := s.store.GetGroup(r.Context(), groupID); errors.Is(err, store.ErrNotFound) {
+	gExisting, err := s.store.GetGroup(r.Context(), groupID)
+	if errors.Is(err, store.ErrNotFound) {
 		writeAPIError(w, r, http.StatusNotFound, ErrCodeNotFound, "Group not found.")
 		return
 	} else if err != nil {
 		writeAPIError(w, r, http.StatusInternalServerError, ErrCodeInternal, "Failed to load group.")
+		return
+	}
+	if gExisting.LeaderID != nil && *gExisting.LeaderID == userID {
+		writeAPIError(w, r, http.StatusUnprocessableEntity, ErrCodeValidation, "Cannot remove the current group leader. Assign a different leader first.")
 		return
 	}
 	if err := s.store.RemoveGroupMember(r.Context(), groupID, userID); err != nil {

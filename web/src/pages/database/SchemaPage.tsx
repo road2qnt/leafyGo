@@ -1,20 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { KeyRound, ListTree, Search, Table2 } from "lucide-react";
+import { ListTree } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 
 import { databaseApi } from "../../api/endpoints";
 import {
-  Callout,
-  Card,
   EmptyState,
   ErrorBanner,
   PageLoader,
   SearchInput,
-  SectionHeader,
   TableEmpty,
   TableWrap,
 } from "../../components/ui";
+import { reveal } from "../../components/reveal";
 import { formatBytes, formatNumber } from "../../lib/format";
 
 export default function SchemaPage() {
@@ -40,17 +38,13 @@ export default function SchemaPage() {
   );
 
   useEffect(() => {
-    if (!selected && tables.length > 0) {
-      setSelected(tables[0].name);
-    }
-  }, [selected, tables]);
-
-  useEffect(() => {
     setSelected("");
     setFilter("");
   }, [dbId]);
 
-  const activeTable = tables.find((table) => table.name === selected) ?? tables[0];
+  const activeTable =
+    tables.find((table) => `${table.schema}.${table.name}` === selected || table.name === selected) ??
+    tables[0];
   const detailQuery = useQuery({
     queryKey: ["database", dbId, "schema-detail", activeTable?.schema, activeTable?.name],
     queryFn: () => databaseApi.schemaTable(dbId, activeTable as (typeof tables)[number]),
@@ -64,114 +58,145 @@ export default function SchemaPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <Callout tone="info" title="Catalog only — internal tables are hidden">
-        LeafyGo hides its own <code className="font-mono text-xs">_leafygo_*</code> checkpoint and
-        evidence tables from this inspector.
-      </Callout>
-
+    <div className="space-y-6">
       {tables.length === 0 ? (
         <EmptyState
           icon={ListTree}
-          title="No tables visible"
-          description="The target is reachable but the catalog is empty, or the configured role has no visible objects."
+          title="No tables yet"
+          description="This database has no tables or views outside the built-in PostgreSQL schemas."
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-          <Card className="flex max-h-[70vh] flex-col overflow-hidden">
-            <div className="border-b border-line p-3">
-              <SearchInput value={filter} onChange={setFilter} placeholder="Filter tables…" />
-            </div>
-            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
-              {filtered.map((table) => (
-                <button
-                  key={`${table.schema}.${table.name}`}
-                  type="button"
-                  onClick={() => setSelected(table.name)}
-                  className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition ${
-                    activeTable?.name === table.name
-                      ? "bg-leaf-50 text-leaf-900"
-                      : "hover:bg-[#f7f6f0]"
-                  }`}
-                >
-                  <Table2 className="mt-0.5 h-4 w-4 shrink-0 text-leaf-600" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{table.name}</span>
-                    <span className="block font-mono text-[10px] text-muted">
-                      {formatNumber(table.row_estimate)} rows · {formatBytes(table.size_bytes)}
-                    </span>
-                  </span>
-                </button>
-              ))}
-              {filtered.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-muted">
-                  <Search className="mx-auto mb-1 h-4 w-4" /> No table matches.
-                </p>
-              ) : null}
-            </div>
-          </Card>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.65fr)]">
+          <section aria-labelledby="tables-caption" className="space-y-3">
+            <SearchInput value={filter} onChange={setFilter} placeholder="Filter tables…" />
+            <TableWrap>
+              <table className="table-base">
+                <caption id="tables-caption">
+                  {filtered.length} {filtered.length === 1 ? "table or view" : "tables and views"}
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="th">Schema</th>
+                    <th scope="col" className="th">Name</th>
+                    <th scope="col" className="th text-right">Rows</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((table) => {
+                    const key = `${table.schema}.${table.name}`;
+                    const isSelected =
+                      activeTable?.schema === table.schema && activeTable?.name === table.name;
+                    return (
+                      <tr
+                        key={key}
+                        className={isSelected ? "is-selected" : undefined}
+                      >
+                        <td className="td font-mono text-xs text-ink-soft">{table.schema}</td>
+                        <th scope="row" className="td font-mono">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelected(key);
+                              reveal("table-detail");
+                            }}
+                            className="cursor-pointer border-0 bg-transparent p-0 text-left font-mono font-semibold break-all text-leaf-800 underline hover:text-leaf-900 pointer-coarse:min-h-11 pointer-coarse:w-full"
+                          >
+                            {table.name}
+                          </button>
+                        </th>
+                        <td className="td text-right font-mono tabular-nums">
+                          {formatNumber(table.row_estimate)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 ? (
+                    <TableEmpty colSpan={3}>No table matches the filter.</TableEmpty>
+                  ) : null}
+                </tbody>
+              </table>
+            </TableWrap>
+          </section>
 
-          <div className="min-w-0 space-y-4">
+          <section id="table-detail" className="min-w-0 space-y-4">
             {activeTable ? (
               <>
-                <Card className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[11px] text-muted">{activeTable.schema}</p>
-                      <h2 className="text-lg font-semibold text-ink">{activeTable.name}</h2>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className="badge badge-neutral">{detail?.columns.length ?? activeTable.columns.length} columns</span>
-                      <span className="badge badge-neutral">~{formatNumber(activeTable.row_estimate)} rows</span>
-                      <span className="badge badge-neutral">{formatBytes(activeTable.size_bytes)}</span>
-                    </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="m-0 flex flex-wrap items-center gap-2 text-xl font-semibold text-ink">
+                    <span className="badge badge-neutral">TABLE</span>
+                    <span className="min-w-0 font-mono break-all">
+                      {activeTable.schema}.{activeTable.name}
+                    </span>
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+                    <span>~{formatNumber(activeTable.row_estimate)} rows</span>
+                    <span>·</span>
+                    <span className="font-mono">{formatBytes(activeTable.size_bytes)}</span>
+                    <Link
+                      to={`/databases/${dbId}/data?table=${encodeURIComponent(`${activeTable.schema}.${activeTable.name}`)}`}
+                      className="btn btn-sm ml-1"
+                    >
+                      Browse data
+                    </Link>
                   </div>
-                </Card>
-
-                <div>
-                  <SectionHeader title="Columns" description="Types as reported by the target catalog." />
-                  <TableWrap>
-                    <table className="table-base min-w-[640px]">
-                      <thead>
-                        <tr>
-                          <th className="th">Column</th>
-                          <th className="th">Type</th>
-                          <th className="th">Nullable</th>
-                          <th className="th">Default</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(detail?.columns ?? []).map((column) => (
-                          <tr key={column.name} className="tr-hover">
-                            <td className="td">
-                              <span className="inline-flex items-center gap-1.5 font-mono text-xs">
-                                {column.is_primary_key ? (
-                                  <KeyRound className="h-3.5 w-3.5 text-[#b38327]" aria-label="Primary key" />
-                                ) : null}
-                                {column.name}
-                              </span>
-                            </td>
-                            <td className="td font-mono text-xs text-muted">{column.data_type}</td>
-                            <td className="td">
-                              <span className={`badge ${column.nullable ? "badge-warning" : "badge-success"}`}>
-                                {column.nullable ? "NULL" : "NOT NULL"}
-                              </span>
-                            </td>
-                            <td className="td max-w-64 truncate font-mono text-[11px] text-muted" title={column.default_value ?? ""}>
-                              {column.default_value ?? "—"}
-                            </td>
-                          </tr>
-                        ))}
-                        {(detail?.columns ?? []).length === 0 ? (
-                          <TableEmpty colSpan={4}>Catalog returned no columns.</TableEmpty>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </TableWrap>
                 </div>
+
+                <TableWrap>
+                  <table className="table-base table-stack">
+                    <caption id="cols-caption">
+                      {(detail?.columns ?? []).length}{" "}
+                      {(detail?.columns ?? []).length === 1 ? "column" : "columns"}
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col" className="th text-right">#</th>
+                        <th scope="col" className="th">Name</th>
+                        <th scope="col" className="th">Type</th>
+                        <th scope="col" className="th">Nullable</th>
+                        <th scope="col" className="th">Default</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(detail?.columns ?? []).map((column, index) => (
+                        <tr key={column.name}>
+                          <td data-label="#" className="td text-right font-mono tabular-nums">{index + 1}</td>
+                          <th scope="row" data-label="Name" className="td cell-title font-mono font-semibold">
+                            <span>
+                              {column.name}
+                              {column.is_primary_key ? (
+                                <abbr
+                                  title="Primary key"
+                                  className="ml-1.5 font-sans text-xs font-bold tracking-wider text-ink-soft no-underline"
+                                >
+                                  PK
+                                </abbr>
+                              ) : null}
+                            </span>
+                          </th>
+                          <td data-label="Type" className="td font-mono">{column.data_type}</td>
+                          <td data-label="Nullable" className="td">{column.nullable ? "Yes" : "No"}</td>
+                          <td
+                            data-label="Default"
+                            className="td max-w-64 truncate font-mono"
+                            title={column.default_value ?? ""}
+                          >
+                            {column.default_value ? (
+                              column.default_value
+                            ) : (
+                              <span className="text-muted italic">none</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {(detail?.columns ?? []).length === 0 ? (
+                        <TableEmpty colSpan={5}>Catalog returned no columns.</TableEmpty>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </TableWrap>
               </>
             ) : null}
-          </div>
+          </section>
         </div>
       )}
     </div>

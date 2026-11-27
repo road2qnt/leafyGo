@@ -1,17 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  CheckCircle2,
-  FileCode2,
-  Lock,
-  Save,
-  Send,
-  ShieldAlert,
-  Sparkles,
-  Undo2,
-  Wand2,
-} from "lucide-react";
+import { ArrowLeft, Save, Send, Undo2, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -22,7 +10,6 @@ import {
   Button,
   Callout,
   CheckboxRow,
-  CodeBlock,
   ConfirmDialog,
   ErrorBanner,
   Field,
@@ -112,7 +99,8 @@ function validateForm(form: EditorForm): string[] {
   if (!form.title.trim()) errors.push("Title is required.");
   if (!form.sqlUp.trim()) errors.push("SQL Up is required.");
   if (form.irreversible) {
-    if (!form.irreversibleReason.trim()) errors.push("Explain why this migration is irreversible.");
+    if (!form.irreversibleReason.trim())
+      errors.push("Explain why this migration is irreversible.");
   } else if (!form.sqlDown.trim()) {
     errors.push("SQL Down is required unless the migration is marked irreversible.");
   }
@@ -120,7 +108,8 @@ function validateForm(form: EditorForm): string[] {
     if (!form.tableName.trim()) errors.push("Batch table name is required.");
     if (!form.cursorCol.trim()) errors.push("Batch cursor column is required.");
     const size = Number(form.batchSize);
-    if (!Number.isFinite(size) || size <= 0) errors.push("Batch size must be a positive integer.");
+    if (!Number.isFinite(size) || size <= 0)
+      errors.push("Batch size must be a positive integer.");
   }
   return errors;
 }
@@ -138,7 +127,8 @@ export default function MigrationEditorPage() {
     queryFn: () => migrationApi.list(dbId),
   });
 
-  const migration = migrationsQuery.data?.migrations.find((entry) => entry.id === migrationId) ?? null;
+  const migration =
+    migrationsQuery.data?.migrations.find((entry) => entry.id === migrationId) ?? null;
   const [form, setForm] = useState<EditorForm>(emptyForm);
   const [hydratedId, setHydratedId] = useState<string | null>(isNew ? "__new__" : null);
 
@@ -166,7 +156,9 @@ export default function MigrationEditorPage() {
   }, [isNew, migration, hydratedId]);
 
   const activeProposal = migration?.active_proposal ?? null;
-  const locked = Boolean(migration?.is_immutable || (activeProposal && activeProposal.status !== "withdrawn"));
+  const locked = Boolean(
+    migration?.is_immutable || (activeProposal && activeProposal.status !== "withdrawn"),
+  );
   const canEdit = overview.level === "edit";
   const readOnly = !canEdit || locked;
 
@@ -211,9 +203,9 @@ export default function MigrationEditorPage() {
         navigate(`/databases/${dbId}/migrations/${created.id}/edit`, { replace: true });
       } else if (migration) {
         const updated = await migrationApi.update(dbId, migration.id, {
-        ...input,
-        revision: migration.revision,
-      });
+          ...input,
+          revision: migration.revision,
+        });
         setForm(formFor(updated));
         toast.success("Definition saved", `Revision ${updated.revision} is ready for validation.`);
         await invalidate();
@@ -257,7 +249,10 @@ export default function MigrationEditorPage() {
         migration_id: migration.id,
         action_type: "apply",
       });
-      toast.success("Proposal submitted", "Approval requests are now visible to every required leader.");
+      toast.success(
+        "Proposal submitted",
+        "Approval requests are now visible to every required leader.",
+      );
       setSubmitOpen(false);
       navigate(`/databases/${dbId}/proposals/${proposal.id}`);
     } catch (error) {
@@ -273,7 +268,10 @@ export default function MigrationEditorPage() {
     setActionError(null);
     try {
       await migrationApi.withdraw(dbId, activeProposal.id);
-      toast.success("Proposal withdrawn", "Approvals are cleared and the definition is editable again.");
+      toast.success(
+        "Proposal withdrawn",
+        "Approvals are cleared and the definition is editable again.",
+      );
       await invalidate();
     } catch (error) {
       setActionError(error);
@@ -295,14 +293,13 @@ export default function MigrationEditorPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        eyebrow={isNew ? "New definition" : `Definition · revision ${migration?.revision ?? 1}`}
-        title={isNew ? "Create migration" : form.title || "Untitled migration"}
+        title={isNew ? "New migration draft" : form.title || "Untitled draft"}
         description={
           isNew
-            ? "SQL is validated against the target before review. Transaction control statements are rejected."
-            : `effective_seq ${migration?.effective_seq} · raw seq ${migration?.seq_version} · updated ${formatDateTime(migration?.updated_at)}`
+            ? "All statements run inside a single transaction (or per batch). Do not write BEGIN, COMMIT, or ROLLBACK yourself."
+            : `Revision ${migration?.revision ?? 1} · effective_seq ${migration?.effective_seq} · raw seq ${migration?.seq_version} · updated ${formatDateTime(migration?.updated_at)}`
         }
         actions={
           <>
@@ -329,13 +326,11 @@ export default function MigrationEditorPage() {
 
       {!canEdit ? (
         <Callout tone="info" title="View-only definition">
-          Your access grant is View. Editing requires View + Edit.
+          Your access grant is View Only. Editing requires View + Edit.
         </Callout>
-      ) : locked ? (
+      ) : locked && !activeProposal ? (
         <Callout tone="warning" title="Definition is locked">
-          {migration?.is_immutable
-            ? "Execution has started, so SQL columns are permanently immutable."
-            : "An active proposal locks the specification columns until it is withdrawn or rejected."}
+          Execution has started, so SQL columns are permanently immutable.
         </Callout>
       ) : null}
 
@@ -345,27 +340,50 @@ export default function MigrationEditorPage() {
           title="Active proposal"
           action={
             activeProposal.status === "pending_review" ? (
-              <Button variant="secondary" size="sm" onClick={() => void withdraw()} loading={withdrawing}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void withdraw()}
+                loading={withdrawing}
+              >
                 <Undo2 className="h-3.5 w-3.5" /> Withdraw
               </Button>
             ) : null
           }
         >
-          <Link to={`/databases/${dbId}/proposals/${activeProposal.id}`} className="font-semibold underline">
+          <Link
+            to={`/databases/${dbId}/proposals/${activeProposal.id}`}
+            className="font-semibold underline"
+          >
             {activeProposal.status.replaceAll("_", " ")} · {actionLabel(activeProposal.action_type)}
           </Link>{" "}
           — open it to review approvals or execution.
+          {locked ? (
+            <span className="mt-1 block">
+              {migration?.is_immutable
+                ? "The definition is locked: execution has started, so SQL columns are permanently immutable."
+                : "The definition is locked until the proposal is withdrawn or rejected."}
+            </span>
+          ) : null}
         </Callout>
       ) : null}
 
       {saveError ? <ErrorBanner error={saveError} /> : null}
       {actionError ? <ErrorBanner error={actionError} /> : null}
 
-      <form className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]" onSubmit={(event) => void save(event)}>
-        <div className="min-w-0 space-y-5">
-          <div className="card space-y-4 p-5">
+      <form
+        className="split-layout min-w-0"
+        onSubmit={(event) => void save(event)}
+      >
+        <div className="min-w-0 space-y-6">
+          <div className="card card-pad space-y-4">
             <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-              <Field label="Title" htmlFor="migration-title" required>
+              <Field
+                label="Title"
+                htmlFor="migration-title"
+                required
+                hint="Up to 200 characters."
+              >
                 <TextInput
                   id="migration-title"
                   value={form.title}
@@ -377,15 +395,17 @@ export default function MigrationEditorPage() {
               </Field>
               <div>
                 <span className="label">Execution mode</span>
-                <div className="flex rounded-lg border border-line bg-[#f7f6f0] p-1">
+                <div className="mt-1 inline-flex border-2 border-ink bg-canvas">
                   {(["normal", "batch"] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
                       disabled={readOnly}
                       onClick={() => update("mode", mode)}
-                      className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                        form.mode === mode ? "bg-white text-leaf-900 shadow-sm" : "text-muted hover:text-ink"
+                      className={`min-h-[2.75rem] cursor-pointer px-4 py-2 text-sm font-semibold ${
+                        form.mode === mode
+                          ? "bg-leaf-700 text-paper"
+                          : "bg-paper text-ink hover:bg-leaf-50"
                       }`}
                     >
                       {mode === "normal" ? "Normal" : "Per batch"}
@@ -394,6 +414,7 @@ export default function MigrationEditorPage() {
                 </div>
               </div>
             </div>
+
             <Field label="Description" htmlFor="migration-description">
               <Textarea
                 id="migration-description"
@@ -405,12 +426,12 @@ export default function MigrationEditorPage() {
             </Field>
           </div>
 
-          <div className="grid gap-4 2xl:grid-cols-2">
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="label mb-0">SQL Up</span>
-                <FileCode2 className="h-4 w-4 text-leaf-500" />
-              </div>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="label mb-0">SQL Up</label>
+              <p className="hint m-0">
+                Forward statements executed inside a transaction or cursor-scoped batch.
+              </p>
               <SqlEditor
                 value={form.sqlUp}
                 onChange={(value) => update("sqlUp", value)}
@@ -419,11 +440,11 @@ export default function MigrationEditorPage() {
                 ariaLabel="SQL Up"
               />
             </div>
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="label mb-0">SQL Down</span>
-                <Undo2 className="h-4 w-4 text-leaf-500" />
-              </div>
+            <div className="space-y-1.5">
+              <label className="label mb-0">SQL Down</label>
+              <p className="hint m-0">
+                Reverse statements used for LIFO rollback or batch compensation.
+              </p>
               <SqlEditor
                 value={form.sqlDown}
                 onChange={(value) => update("sqlDown", value)}
@@ -434,7 +455,7 @@ export default function MigrationEditorPage() {
             </div>
           </div>
 
-          <div className="card space-y-4 p-5">
+          <div className="card card-pad space-y-4">
             <CheckboxRow
               label="Mark as irreversible"
               description="Irreversible migrations cannot be reverted per batch or rolled back. A reason is mandatory."
@@ -456,15 +477,15 @@ export default function MigrationEditorPage() {
           </div>
 
           {form.mode === "batch" ? (
-            <div className="card space-y-4 p-5">
+            <div className="card card-pad space-y-4">
               <div>
-                <p className="text-sm font-semibold text-ink">Batch cursor configuration</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                <h2 className="m-0 text-lg font-semibold text-ink">Batch cursor configuration</h2>
+                <p className="m-0 mt-1 text-sm text-muted">
                   Rows are processed with <code className="font-mono">LIMIT</code> over an integer
                   cursor. The rollback must be expressible with the same cursor range.
                 </p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <Field label="Target table" htmlFor="batch-table" required>
                   <TextInput
                     id="batch-table"
@@ -475,7 +496,12 @@ export default function MigrationEditorPage() {
                     disabled={readOnly}
                   />
                 </Field>
-                <Field label="Cursor column" htmlFor="batch-cursor" required hint="Must be smallint, integer, or bigint.">
+                <Field
+                  label="Cursor column"
+                  htmlFor="batch-cursor"
+                  required
+                  hint="smallint, integer, or bigint."
+                >
                   <TextInput
                     id="batch-cursor"
                     value={form.cursorCol}
@@ -497,16 +523,17 @@ export default function MigrationEditorPage() {
                   />
                 </Field>
               </div>
-              <div className="rounded-xl border border-dashed border-[#c9a7d8] bg-[#faf5fc] p-4">
+              <div className="border-2 border-dashed border-ink-soft bg-canvas p-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-[#54376f]">Drift detection guard</p>
+                  <p className="m-0 text-sm font-semibold text-ink">Drift detection guard</p>
                   <span className="tag-optional">Optional</span>
                 </div>
-                <p className="mt-1 text-xs leading-relaxed text-[#54376f]/75">
-                  If set, revert refuses batches whose rows changed after <code className="font-mono">committed_at</code>.
-                  Fallback without this field: reject irreversible or LIFO-breaking reverts only.
+                <p className="mt-1 mb-3 text-xs leading-relaxed text-ink-soft">
+                  If set, revert refuses batches whose rows changed after{" "}
+                  <code className="font-mono">committed_at</code>. Fallback without this field:
+                  reject irreversible or LIFO-breaking reverts only.
                 </p>
-                <Field label="updated_at column" htmlFor="batch-updated" className="mt-3">
+                <Field label="updated_at column" htmlFor="batch-updated">
                   <TextInput
                     id="batch-updated"
                     value={form.updatedAtCol}
@@ -520,9 +547,9 @@ export default function MigrationEditorPage() {
             </div>
           ) : null}
 
-          <div className="card space-y-3 p-5">
+          <div className="card card-pad space-y-3">
             <Field
-              label="Replaces failed migration (optional)"
+              label="Replaces failed migration"
               htmlFor="replaces"
               hint="The replacement inherits the target's effective_seq. Only failed/pending chains can be superseded."
             >
@@ -535,23 +562,23 @@ export default function MigrationEditorPage() {
                 <option value="">None</option>
                 {replaceOptions.map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>
-                    eff #{candidate.effective_seq} · raw #{candidate.seq_version} · {candidate.title}
+                    eff #{candidate.effective_seq} · raw #{candidate.seq_version} ·{" "}
+                    {candidate.title}
                   </option>
                 ))}
               </Select>
             </Field>
             {form.replacesId ? (
-              <p className="flex items-center gap-1.5 text-[11px] text-[#6d4b8f]">
-                <Sparkles className="h-3.5 w-3.5" /> The replacement will hold the same effective slot
-                and supersede the previous chain.
+              <p className="m-0 text-xs font-semibold text-leaf-800">
+                The replacement will hold the same effective slot and supersede the previous chain.
               </p>
             ) : null}
           </div>
         </div>
 
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
-          <div className="card p-4">
-            <p className="section-title">Review readiness</p>
+        <aside className="aside-stack lg:sticky lg:top-20 lg:self-start">
+          <div className="card p-4 sm:p-5">
+            <h2 className="section-title">Review readiness</h2>
             {dryRun ? (
               <div className="mt-3">
                 {dryRun.dry_run_status === "passed" ? (
@@ -562,7 +589,9 @@ export default function MigrationEditorPage() {
                   <Callout tone="warning" title="Inconclusive — review may continue">
                     {dryRun.message ?? "Statement timeout or lock contention."}
                     {dryRun.sqlstate ? (
-                      <span className="mt-1 block font-mono text-[10px]">SQLSTATE {dryRun.sqlstate}</span>
+                      <span className="mt-1 block font-mono text-xs">
+                        SQLSTATE {dryRun.sqlstate}
+                      </span>
                     ) : null}
                   </Callout>
                 ) : (
@@ -572,17 +601,20 @@ export default function MigrationEditorPage() {
                 )}
               </div>
             ) : (
-              <p className="mt-2 text-xs leading-relaxed text-muted">
+              <p className="mt-2 mb-0 text-sm leading-relaxed text-muted">
                 Save the definition, then run validation. Validation uses a short-lived dedicated
                 connection with lock and statement timeouts.
               </p>
             )}
             {validateError && !isApiError(validateError) ? (
-              <div className="mt-3"><ErrorBanner error={validateError} /></div>
+              <div className="mt-3">
+                <ErrorBanner error={validateError} />
+              </div>
             ) : null}
-            <div className="mt-3 flex flex-col gap-2">
+            <div className="mt-4 flex flex-col gap-2">
               <Button
                 variant="secondary"
+                type="button"
                 onClick={() => void validate()}
                 loading={validating}
                 disabled={isNew || !migration || readOnly}
@@ -590,57 +622,53 @@ export default function MigrationEditorPage() {
               >
                 <Wand2 className="h-4 w-4" /> Validate / dry-run
               </Button>
-              {isNew ? <p className="text-[10px] text-muted">Save first to enable validation.</p> : null}
+              {isNew ? (
+                <p className="m-0 text-xs text-muted">Save first to enable validation.</p>
+              ) : null}
             </div>
           </div>
 
-          <div className="card p-4">
-            <p className="section-title">Definition facts</p>
-            <dl className="mt-3 space-y-2.5 text-xs">
+          <div className="card p-4 sm:p-5">
+            <h2 className="section-title">Definition facts</h2>
+            <dl className="m-0 mt-3 grid gap-2 text-sm">
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Definition ID</dt>
-                <dd className="font-mono text-[10px]">{migration?.id ?? "not saved"}</dd>
+                <dt className="font-semibold text-ink-soft">Definition ID</dt>
+                <dd className="m-0 font-mono text-xs">{migration?.id ?? "not saved"}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Revision</dt>
-                <dd className="font-mono">{migration?.revision ?? 1}</dd>
+                <dt className="font-semibold text-ink-soft">Revision</dt>
+                <dd className="m-0 font-mono">{migration?.revision ?? 1}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Effective slot</dt>
-                <dd className="font-mono">#{migration?.effective_seq ?? "—"}</dd>
+                <dt className="font-semibold text-ink-soft">Effective slot</dt>
+                <dd className="m-0 font-mono">#{migration?.effective_seq ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Raw sequence</dt>
-                <dd className="font-mono">#{migration?.seq_version ?? "—"}</dd>
+                <dt className="font-semibold text-ink-soft">Raw sequence</dt>
+                <dd className="m-0 font-mono">#{migration?.seq_version ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Immutable</dt>
-                <dd>{migration?.is_immutable ? <span className="badge badge-warning"><Lock className="h-3 w-3" /> yes</span> : <span className="badge badge-neutral">no</span>}</dd>
+                <dt className="font-semibold text-ink-soft">Immutable</dt>
+                <dd className="m-0">
+                  {migration?.is_immutable ? (
+                    <span className="badge badge-warning">yes</span>
+                  ) : (
+                    <span className="badge badge-muted">no</span>
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Reversible</dt>
-                <dd>{form.irreversible ? <span className="badge badge-danger">no</span> : <span className="badge badge-success">yes</span>}</dd>
+                <dt className="font-semibold text-ink-soft">Reversible</dt>
+                <dd className="m-0">
+                  {form.irreversible ? (
+                    <span className="badge badge-danger">no</span>
+                  ) : (
+                    <span className="badge badge-success">yes</span>
+                  )}
+                </dd>
               </div>
             </dl>
           </div>
-
-          <div className="card p-4">
-            <p className="section-title">Rules</p>
-            <ul className="mt-2 space-y-2 text-[11px] leading-relaxed text-muted">
-              <li className="flex gap-2"><ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#b38327]" /> Manual BEGIN/COMMIT/ROLLBACK is rejected.</li>
-              <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#b38327]" /> VACUUM, CLUSTER, CREATE INDEX CONCURRENTLY, ALTER SYSTEM are non-transactional and rejected.</li>
-              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-leaf-600" /> A successful batch update writes its checkpoint in the same transaction.</li>
-            </ul>
-          </div>
-
-          {migration ? (
-            <div className="card p-4">
-              <p className="section-title">SQL preview</p>
-              <div className="mt-2">
-                <CodeBlock code={form.sqlUp || "-- empty --"} label="up" maxHeight="12rem" />
-              </div>
-            </div>
-          ) : null}
         </aside>
       </form>
 
@@ -651,7 +679,7 @@ export default function MigrationEditorPage() {
         title="Submit this migration for approval?"
         description={
           <div className="space-y-2">
-            <p>
+            <p className="m-0">
               Every group leader with access to this database must approve. The definition becomes
               immutable once an execution starts.
             </p>

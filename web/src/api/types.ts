@@ -117,6 +117,7 @@ export interface SchemaTable {
   name: string;
   row_estimate: number;
   size_bytes: number;
+  can_select?: boolean;
   columns: SchemaColumn[];
 }
 

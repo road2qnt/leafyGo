@@ -27,10 +27,22 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
-const toneStyles: Record<ToastTone, string> = {
-  success: "border-leaf-200 bg-leaf-50 text-leaf-800",
-  error: "border-[#e9c3b9] bg-[#fbebe6] text-[#7d2f21]",
-  info: "border-[#bdd8e4] bg-[#edf6fa] text-[#245b75]",
+const toneStyles: Record<ToastTone, { box: string; bar: string; icon: string }> = {
+  success: {
+    box: "border-leaf-600 bg-leaf-100 text-ink",
+    bar: "bg-leaf-600",
+    icon: "text-leaf-700",
+  },
+  error: {
+    box: "border-crimson bg-crimson-wash text-ink",
+    bar: "bg-crimson",
+    icon: "text-crimson",
+  },
+  info: {
+    box: "border-cobalt bg-cobalt-wash text-ink",
+    bar: "bg-cobalt",
+    icon: "text-cobalt",
+  },
 };
 
 const toneIcons = {
@@ -52,7 +64,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       counter.current += 1;
       const id = counter.current;
       setItems((current) => [...current.slice(-3), { id, tone, title, message }]);
-      window.setTimeout(() => remove(id), 5500);
+      if (tone !== "error") {
+        window.setTimeout(() => remove(id), 6000);
+      }
     },
     [remove],
   );
@@ -70,27 +84,34 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed inset-x-3 bottom-3 z-[70] flex flex-col items-end gap-2 sm:inset-x-auto sm:right-5 sm:bottom-5 sm:w-96">
+      <div className="pointer-events-none fixed inset-x-3 bottom-3 z-[70] flex flex-col items-end gap-2 sm:inset-x-auto sm:right-5 sm:bottom-5 sm:w-[26rem]">
         {items.map((item) => {
           const Icon = toneIcons[item.tone];
+          const style = toneStyles[item.tone];
           return (
             <div
               key={item.id}
-              role="status"
-              className={`pointer-events-auto flex w-full items-start gap-3 rounded-xl border px-3.5 py-3 shadow-lg shadow-leaf-900/10 ${toneStyles[item.tone]}`}
+              role={item.tone === "error" ? "alert" : "status"}
+              className={`group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden border-2 border-l-8 pt-4 pr-2 pb-3 pl-4 shadow-[2px_2px_0_rgb(15_31_20/0.18)] ${style.box}`}
             >
-              <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="min-w-0 flex-1">
+              {item.tone !== "error" ? (
+                <div
+                  aria-hidden="true"
+                  className={`absolute top-0 right-0 left-0 h-1 origin-left animate-[flash-timer_6s_linear_forwards] group-hover:[animation-play-state:paused] group-focus-within:[animation-play-state:paused] ${style.bar}`}
+                />
+              ) : null}
+              <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${style.icon}`} aria-hidden />
+              <div className="min-w-0 flex-1 py-0.5">
                 <p className="text-sm font-semibold">{item.title}</p>
-                {item.message ? <p className="mt-0.5 text-xs leading-relaxed opacity-85">{item.message}</p> : null}
+                {item.message ? <p className="mt-0.5 text-sm leading-relaxed text-ink-soft">{item.message}</p> : null}
               </div>
               <button
                 type="button"
                 onClick={() => remove(item.id)}
-                className="rounded p-1 opacity-60 transition hover:opacity-100"
+                className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center border-2 border-transparent bg-transparent text-ink hover:border-ink-soft hover:bg-paper pointer-coarse:h-11 pointer-coarse:w-11"
                 aria-label="Dismiss notification"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
           );

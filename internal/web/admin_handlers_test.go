@@ -388,3 +388,90 @@ func TestNonAdminCannotMutateAdminResources(t *testing.T) {
 		t.Fatal("a forbidden request still deleted the connection")
 	}
 }
+
+func TestAPIAdminGroupMandatoryLeaderAndNoAdminMember(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+	admin := seedUser(t, st, "admin", "password123", true)
+	leader := seedUser(t, st, "budi", "password123", false)
+	member := seedUser(t, st, "ega", "password123", false)
+	inactive := seedUser(t, st, "eko", "password123", false)
+	_ = st.SetUserActiveGuarded(ctx, inactive.ID, false, admin.ID)
+
+	adminSID, adminCSRF := apiLogin(t, srv, "admin", "password123")
+
+	// 1. Creating a group without leader_id must fail (422)
+	recNoLeader := apiRequestJSON(t, srv, http.MethodPost, "/api/v1/admin/groups", adminSID, adminCSRF, map[string]any{
+		"name":        "no-leader-group",
+		"description": "should fail",
+	})
+	assertStatus(t, recNoLeader, http.StatusUnprocessableEntity, "create group without leader")
+
+	// 2. Creating a group with a Platform Admin as leader must fail (422)
+	recAdminLeader := apiRequestJSON(t, srv, http.MethodPost, "/api/v1/admin/groups", adminSID, adminCSRF, map[string]any{
+		"name":        "admin-leader-group",
+		"description": "should fail",
+		"leader_id":   admin.ID,
+	})
+	assertStatus(t, recAdminLeader, http.StatusUnprocessableEntity, "create group with admin leader")
+
+	// 3. Creating a group with an inactive user as leader must fail (422)
+	recInactiveLeader := apiRequestJSON(t, srv, http.MethodPost, "/api/v1/admin/groups", adminSID, adminCSRF, map[string]any{
+		"name":        "inactive-leader-group",
+		"description": "should fail",
+		"leader_id":   inactive.ID,
+	})
+	assertStatus(t, recInactiveLeader, http.StatusUnprocessableEntity, "create group with inactive leader")
+
+	// 4. Creating a group with an active non-admin leader succeeds (201) and adds leader as member
+	recOK := apiRequestJSON(t, srv, http.MethodPost, "/api/v1/admin/groups", adminSID, adminCSRF, map[string]any{
+		"name":        "platform-eng",
+		"description": "Platform Engineering",
+		"leader_id":   leader.ID,
+	})
+	assertStatus(t, recOK, http.StatusCreated, "create group with valid leader")
+
+	grp, err := st.GetGroupByName(ctx, "platform-eng")
+	if err != nil {
+		t.Fatalf("get created group: %v", err)
+	}
+	if grp.LeaderID == nil || *grp.LeaderID != leader.ID {
+		t.Fatalf("created group leader = %v; want %v", grp.LeaderID, leader.ID)
+	}
+	members, err := st.ListGroupMembers(ctx, grp.ID)
+	if err != nil || len(members) != 1 || members[0].ID != leader.ID {
+		t.Fatalf("created group members = %+v, %v; want leader as member", members, err)
+	}
+
+	groupBase := "/api/v1/admin/groups/" + grp.ID.String()
+
+	// 5. Adding a Platform Admin as a member must fail (422)
+	recAddAdmin := apiRequestJSON(t, srv, http.MethodPost, groupBase+"/members", adminSID, adminCSRF, map[string]any{
+		"user_id": admin.ID,
+	})
+	assertStatus(t, recAddAdmin, http.StatusUnprocessableEntity, "add admin to group")
+
+	// 6. Setting leader to null/empty or to a Platform Admin must fail (422)
+	recClearLeader := apiRequestJSON(t, srv, http.MethodPut, groupBase+"/leader", adminSID, adminCSRF, map[string]any{
+		"leader_id": nil,
+	})
+	assertStatus(t, recClearLeader, http.StatusUnprocessableEntity, "clear group leader")
+
+	recSetAdminLeader := apiRequestJSON(t, srv, http.MethodPut, groupBase+"/leader", adminSID, adminCSRF, map[string]any{
+		"leader_id": admin.ID,
+	})
+	assertStatus(t, recSetAdminLeader, http.StatusUnprocessableEntity, "set admin as group leader")
+
+	// 7. Removing the current leader from group members without assigning a new leader must fail (422)
+	recRemoveLeader := apiRequestJSON(t, srv, http.MethodDelete, groupBase+"/members/"+leader.ID.String(), adminSID, adminCSRF, nil)
+	assertStatus(t, recRemoveLeader, http.StatusUnprocessableEntity, "remove current group leader")
+
+	// 8. Adding another member, promoting them to leader, and then removing the old leader succeeds
+	assertStatus(t, apiRequestJSON(t, srv, http.MethodPost, groupBase+"/members", adminSID, adminCSRF, map[string]any{
+		"user_id": member.ID,
+	}), http.StatusOK, "add second member")
+	assertStatus(t, apiRequestJSON(t, srv, http.MethodPut, groupBase+"/leader", adminSID, adminCSRF, map[string]any{
+		"leader_id": member.ID,
+	}), http.StatusOK, "promote second member to leader")
+	assertStatus(t, apiRequestJSON(t, srv, http.MethodDelete, groupBase+"/members/"+leader.ID.String(), adminSID, adminCSRF, nil), http.StatusOK, "remove old leader")
+}

@@ -19,7 +19,6 @@ import QueryConsolePage from "./pages/database/QueryConsolePage";
 import SchemaPage from "./pages/database/SchemaPage";
 import LoginPage from "./pages/LoginPage";
 import NotFoundPage from "./pages/NotFoundPage";
-import WorkersPage from "./pages/WorkersPage";
 import { ShieldAlert } from "lucide-react";
 
 function ProtectedRoute() {
@@ -60,12 +59,15 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
-          <Route path="workers" element={<WorkersPage />} />
 
           <Route element={<AdminRoute />}>
             <Route path="admin/users" element={<UsersPage />} />
             <Route path="admin/groups" element={<GroupsPage />} />
+            <Route path="admin/groups/new" element={<GroupsPage />} />
+            <Route path="admin/groups/:groupId" element={<GroupsPage />} />
             <Route path="admin/databases" element={<DatabasesPage />} />
+            <Route path="admin/databases/new" element={<DatabasesPage />} />
+            <Route path="admin/databases/:dbId" element={<DatabasesPage />} />
           </Route>
 
           <Route path="databases/:dbId" element={<DatabaseLayout />}>

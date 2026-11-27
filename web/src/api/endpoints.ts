@@ -62,22 +62,37 @@ export const adminApi = {
     const raw = await api<{ groups: Any[] }>("/admin/groups");
     return { groups: (raw.groups ?? []).map(normalizeGroup) };
   },
-  createGroup: async (input: { name: string; description: string }) =>
+  group: async (groupId: string) =>
+    normalizeGroup(await api<Any>(`/admin/groups/${groupId}`)),
+  createGroup: async (input: { name: string; description: string; leader_id: string }) =>
     normalizeGroup(await api<Any>("/admin/groups", { json: input })),
   updateGroup: async (groupId: string, input: { name: string; description: string }) =>
     normalizeGroup(await api<Any>(`/admin/groups/${groupId}`, { method: "PUT", json: input })),
-  setLeader: async (groupId: string, leaderId: string | null) =>
+  setLeader: async (groupId: string, leaderId: string) =>
     normalizeGroup(await api<Any>(`/admin/groups/${groupId}/leader`, { method: "PUT", json: { leader_id: leaderId } })),
+  addMember: async (groupId: string, userId: string) =>
+    normalizeGroup(await api<Any>(`/admin/groups/${groupId}/members`, { json: { user_id: userId } })),
+  removeMember: async (groupId: string, userId: string) =>
+    normalizeGroup(await api<Any>(`/admin/groups/${groupId}/members/${userId}`, { method: "DELETE" })),
+  setDatabaseAccess: async (groupId: string, dbId: string, level: "view" | "edit" | "none") =>
+    normalizeGroup(await api<Any>(`/admin/groups/${groupId}/access`, { json: { db_id: dbId, level } })),
 
-  setMembers: async (groupId: string, userIds: string[]) => {
+  setMembers: async (groupId: string, userIds: string[], leaderId?: string) => {
     const current = await api<Any>(`/admin/groups/${groupId}`);
     const wanted = new Set(userIds);
+    if (leaderId) wanted.add(leaderId);
     const existing = new Set<string>((current.members ?? []).map((member: Any) => String(member.id)));
     let latest: Any = current;
-    for (const userId of userIds) {
+    for (const userId of wanted) {
       if (!existing.has(userId)) {
         latest = await api<Any>(`/admin/groups/${groupId}/members`, { json: { user_id: userId } });
       }
+    }
+    if (leaderId) {
+      latest = await api<Any>(`/admin/groups/${groupId}/leader`, {
+        method: "PUT",
+        json: { leader_id: leaderId },
+      });
     }
     for (const userId of existing) {
       if (!wanted.has(userId)) {
@@ -190,10 +205,15 @@ export const databaseApi = {
   },
   data: async (
     dbId: string,
-    params: { table: string; page: number; page_size: number; q?: string },
+    params: { schema?: string; table: string; page: number; page_size: number; q?: string },
   ): Promise<DataResponse> => {
     const raw = await api<Any>(
-      `/databases/${dbId}/data${queryString({ table: params.table, page: params.page, limit: params.page_size })}`,
+      `/databases/${dbId}/data${queryString({
+        schema: params.schema,
+        table: params.table,
+        page: params.page,
+        limit: params.page_size,
+      })}`,
     );
     return normalizeData({ ...raw, table: params.table, page_size: params.page_size });
   },

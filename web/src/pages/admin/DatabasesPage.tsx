@@ -1,20 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database as DatabaseIcon, Pencil, PlugZap, Plus, Trash2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 import { isApiError } from "../../api/client";
 import { adminApi } from "../../api/endpoints";
 import type { Database } from "../../api/types";
 import {
   Button,
-  ConfirmDialog,
+  EmptyState,
   ErrorBanner,
   Field,
-  Modal,
   PageHeader,
   PageLoader,
   Select,
-  TableEmpty,
   TableWrap,
   TextInput,
 } from "../../components/ui";
@@ -41,56 +40,210 @@ const emptyForm: DatabaseForm = {
   ssl_mode: "disable",
 };
 
-export default function DatabasesPage() {
-  const queryClient = useQueryClient();
+function DatabasesListView() {
   const toast = useToast();
-  const databasesQuery = useQuery({ queryKey: ["admin", "databases"], queryFn: adminApi.databases });
+  const databasesQuery = useQuery({
+    queryKey: ["admin", "databases"],
+    queryFn: adminApi.databases,
+  });
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<Database | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; text: string }>>({});
+
+  if (databasesQuery.isLoading) return <PageLoader label="Loading connections" />;
+
+  const databases = databasesQuery.data?.databases ?? [];
+
+  const testConnection = async (database: Database) => {
+    setTestingId(database.id);
+    try {
+      const result = await adminApi.testDatabase(database.id);
+      if (result.ok) {
+        setTestResult((current) => ({
+          ...current,
+          [database.id]: { ok: true, text: `Connected in ${result.latency_ms ?? "?"} ms` },
+        }));
+        toast.success(
+          "Connection OK",
+          `${database.name} answered in ${result.latency_ms ?? "?"} ms.`,
+        );
+      } else {
+        setTestResult((current) => ({
+          ...current,
+          [database.id]: { ok: false, text: result.error ?? "Connection failed" },
+        }));
+        toast.error("Connection failed", result.error ?? "The target did not answer.");
+      }
+    } catch (error) {
+      toast.error(
+        "Connection test failed",
+        isApiError(error) ? error.message : "Unexpected error.",
+      );
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Connections"
+        actions={
+          databases.length > 0 ? (
+            <Link to="/admin/databases/new" className="btn btn-primary">
+              <Plus className="h-4 w-4" /> Add connection
+            </Link>
+          ) : null
+        }
+      />
+
+      {databasesQuery.isError ? (
+        <ErrorBanner
+          error={databasesQuery.error}
+          onRetry={() => void databasesQuery.refetch()}
+        />
+      ) : null}
+
+      <section aria-labelledby="conn-caption">
+        {databases.length > 0 ? (
+          <TableWrap>
+            <table className="table-base table-stack">
+              <caption id="conn-caption">
+                {databases.length} {databases.length === 1 ? "connection" : "connections"}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col" className="th">Name</th>
+                  <th scope="col" className="th">Endpoint</th>
+                  <th scope="col" className="th text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {databases.map((database) => {
+                  const status = testResult[database.id];
+                  return (
+                    <tr key={database.id}>
+                      <th scope="row" data-label="Name" className="td cell-title">
+                        <Link
+                          to={`/admin/databases/${database.id}`}
+                          className="font-semibold text-leaf-800 hover:text-leaf-900"
+                        >
+                          {database.name}
+                        </Link>
+                      </th>
+                      <td data-label="Endpoint" className="td cell-wide">
+                        <div>
+                          <span className="font-mono text-sm break-all text-ink">
+                            {database.username}@{database.host}:{database.port}/{database.db_name}
+                          </span>
+                          <span className="mt-1 block text-xs text-muted">
+                            SSL {database.ssl_mode} · updated {formatDateTime(database.updated_at)}
+                          </span>
+                          {status ? (
+                            <span
+                              className={`mt-1 inline-block text-xs font-semibold uppercase ${
+                                status.ok ? "text-leaf-700" : "text-crimson"
+                              }`}
+                            >
+                              {status.text}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td data-label="Actions" className="td cell-actions w-[1%] text-right whitespace-nowrap">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={testingId === database.id}
+                            onClick={() => void testConnection(database)}
+                          >
+                            Test connection<span className="sr-only"> {database.name}</span>
+                          </Button>
+                          <Link
+                            to={`/admin/databases/${database.id}`}
+                            className="btn btn-sm"
+                          >
+                            Edit<span className="sr-only"> {database.name}</span>
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+        ) : (
+          <EmptyState
+            title="No connections yet"
+            description="Register the first PostgreSQL database so groups can be granted access to it."
+            action={
+              <Link to="/admin/databases/new" className="btn btn-primary">
+                <Plus className="h-4 w-4" /> Add connection
+              </Link>
+            }
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function DatabaseFormView({ dbId }: { dbId?: string }) {
+  const isEditing = Boolean(dbId);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
+
+  const databasesQuery = useQuery({
+    queryKey: ["admin", "databases"],
+    queryFn: adminApi.databases,
+    enabled: isEditing,
+  });
+
+  const editing: Database | null = isEditing
+    ? (databasesQuery.data?.databases ?? []).find((db) => db.id === dbId) ?? null
+    : null;
+
   const [form, setForm] = useState<DatabaseForm>(emptyForm);
+  const [hydratedId, setHydratedId] = useState<string | null>(isEditing ? null : "__new__");
   const [formError, setFormError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
 
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<Record<string, string>>({});
-
-  const [deleteTarget, setDeleteTarget] = useState<Database | null>(null);
+  const [testing, setTesting] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const databases = databasesQuery.data?.databases ?? [];
+  useEffect(() => {
+    if (!isEditing) {
+      setForm(emptyForm);
+      setHydratedId("__new__");
+      return;
+    }
+    if (editing && hydratedId !== editing.id) {
+      setForm({
+        name: editing.name,
+        host: editing.host,
+        port: String(editing.port),
+        db_name: editing.db_name,
+        username: editing.username,
+        password: "",
+        ssl_mode: editing.ssl_mode || "disable",
+      });
+      setHydratedId(editing.id);
+    }
+  }, [isEditing, editing, hydratedId]);
+
+  const update = (key: keyof DatabaseForm, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["admin", "databases"] }),
       queryClient.invalidateQueries({ queryKey: ["databases"] }),
     ]);
-  };
-
-  const openCreate = () => {
-    setEditing(null);
-    setForm(emptyForm);
-    setFormError(null);
-    setFormOpen(true);
-  };
-
-  const openEdit = (database: Database) => {
-    setEditing(database);
-    setForm({
-      name: database.name,
-      host: database.host,
-      port: String(database.port),
-      db_name: database.db_name,
-      username: database.username,
-      password: "",
-      ssl_mode: database.ssl_mode,
-    });
-    setFormError(null);
-    setFormOpen(true);
-  };
-
-  const update = (key: keyof DatabaseForm, value: string) => {
-    setForm((current) => ({ ...current, [key]: value }));
   };
 
   const submit = async (event: FormEvent) => {
@@ -106,7 +259,7 @@ export default function DatabasesPage() {
         username: form.username.trim(),
         ssl_mode: form.ssl_mode,
       };
-      if (editing) {
+      if (isEditing && editing) {
         await adminApi.updateDatabase(editing.id, {
           ...input,
           password: form.password ? form.password : undefined,
@@ -116,8 +269,8 @@ export default function DatabasesPage() {
         await adminApi.createDatabase({ ...input, password: form.password });
         toast.success("Connection created", "Grant group access to make it usable.");
       }
-      setFormOpen(false);
       await invalidate();
+      navigate("/admin/databases");
     } catch (error) {
       setFormError(error);
     } finally {
@@ -125,40 +278,41 @@ export default function DatabasesPage() {
     }
   };
 
-  const testConnection = async (database: Database) => {
-    setTestingId(database.id);
-    setTestResult((current) => ({ ...current, [database.id]: "" }));
+  const testConnection = async () => {
+    if (!editing) return;
+    setTesting(true);
     try {
-      const result = await adminApi.testDatabase(database.id);
+      const result = await adminApi.testDatabase(editing.id);
       if (result.ok) {
-        setTestResult((current) => ({
-          ...current,
-          [database.id]: `Connected in ${result.latency_ms ?? "?"} ms`,
-        }));
-        toast.success("Connection OK", `${database.name} answered in ${result.latency_ms ?? "?"} ms.`);
+        toast.success(
+          "Connection OK",
+          `${editing.name} answered in ${result.latency_ms ?? "?"} ms.`,
+        );
       } else {
-        setTestResult((current) => ({ ...current, [database.id]: result.error ?? "Connection failed" }));
         toast.error("Connection failed", result.error ?? "The target did not answer.");
       }
     } catch (error) {
-      toast.error("Connection test failed", isApiError(error) ? error.message : "Unexpected error.");
+      toast.error(
+        "Connection test failed",
+        isApiError(error) ? error.message : "Unexpected error.",
+      );
     } finally {
-      setTestingId(null);
+      setTesting(false);
     }
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!editing) return;
     setDeleting(true);
     setDeleteError(null);
     try {
-      await adminApi.deleteDatabase(deleteTarget.id);
+      await adminApi.deleteDatabase(editing.id);
+      await invalidate();
       toast.success(
         "Connection removed",
         "Databases with history are soft-deleted so execution evidence stays intact.",
       );
-      setDeleteTarget(null);
-      await invalidate();
+      navigate("/admin/databases");
     } catch (error) {
       setDeleteError(error);
     } finally {
@@ -166,188 +320,144 @@ export default function DatabasesPage() {
     }
   };
 
-  if (databasesQuery.isLoading) return <PageLoader label="Loading connections" />;
+  if (isEditing && databasesQuery.isLoading) {
+    return <PageLoader label="Loading connection" />;
+  }
+
+  if (isEditing && !editing) {
+    return (
+      <div className="space-y-4">
+        <nav aria-label="Breadcrumb">
+          <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
+            <li>
+              <Link to="/admin/databases" className="text-leaf-800 hover:text-leaf-900">
+                Connections
+              </Link>
+            </li>
+          </ol>
+        </nav>
+        <ErrorBanner error={new Error("Connection not found.")} />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      <nav aria-label="Breadcrumb">
+        <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0 text-sm">
+          <li>
+            <Link to="/admin/databases" className="text-leaf-800 hover:text-leaf-900">
+              Connections
+            </Link>
+          </li>
+          <li className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted">
+              /
+            </span>
+            <span aria-current="page" className="font-semibold text-ink-soft">
+              {editing ? editing.name : "New connection"}
+            </span>
+          </li>
+        </ol>
+      </nav>
+
       <PageHeader
-        eyebrow="Administration"
-        title="Target connections"
-        description="PostgreSQL targets managed by LeafyGo. Credentials are encrypted with AES-256-GCM; the API never returns the password."
+        title={editing ? `Edit ${editing.name}` : "Add connection"}
+        description={
+          editing ? `Updated ${formatDateTime(editing.updated_at)}` : undefined
+        }
         actions={
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New connection
-          </Button>
+          editing ? (
+            <Button
+              variant="secondary"
+              type="button"
+              loading={testing}
+              onClick={() => void testConnection()}
+            >
+              Test connection
+            </Button>
+          ) : null
         }
       />
 
-      {databasesQuery.isError ? (
-        <ErrorBanner error={databasesQuery.error} onRetry={() => void databasesQuery.refetch()} />
-      ) : null}
+      {/* Card 1: Connection settings */}
+      <section className="card card-pad flex flex-col gap-3" aria-labelledby="conn-form-title">
+        <h2 id="conn-form-title" className="section-title">
+          Connection settings
+        </h2>
+        {formError ? <ErrorBanner error={formError} /> : null}
 
-      <TableWrap>
-        <table className="table-base min-w-[980px]">
-          <thead>
-            <tr>
-              <th className="th">Connection</th>
-              <th className="th">Target</th>
-              <th className="th">User</th>
-              <th className="th">SSL</th>
-              <th className="th">Updated</th>
-              <th className="th text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {databases.map((database) => (
-              <tr key={database.id} className="tr-hover">
-                <td className="td">
-                  <div className="flex items-center gap-2.5">
-                    <span className="grid h-8 w-8 place-items-center rounded-md bg-leaf-50 text-leaf-700">
-                      <DatabaseIcon className="h-4 w-4" />
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium text-ink">{database.name}</p>
-                      <p className="font-mono text-[10px] text-muted">{database.id}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="td">
-                  <p className="font-mono text-xs text-ink">
-                    {database.host}:{database.port}
-                  </p>
-                  <p className="font-mono text-[10px] text-muted">{database.db_name}</p>
-                </td>
-                <td className="td font-mono text-xs">{database.username}</td>
-                <td className="td">
-                  <span className="badge badge-neutral font-mono">{database.ssl_mode}</span>
-                </td>
-                <td className="td text-xs text-muted">{formatDateTime(database.updated_at)}</td>
-                <td className="td">
-                  <div className="flex flex-col items-end gap-1">
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        loading={testingId === database.id}
-                        onClick={() => void testConnection(database)}
-                      >
-                        <PlugZap className="h-3.5 w-3.5" /> Test
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(database)}>
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-[#8b3323] hover:bg-[#fbebe6]"
-                        onClick={() => { setDeleteTarget(database); setDeleteError(null); }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                    {testResult[database.id] ? (
-                      <span
-                        className={`text-[10px] ${
-                          testResult[database.id].startsWith("Connected")
-                            ? "text-leaf-600"
-                            : "text-[#8b3323]"
-                        }`}
-                      >
-                        {testResult[database.id]}
-                      </span>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {databases.length === 0 ? (
-              <TableEmpty colSpan={6}>No connections yet. Register the first target database.</TableEmpty>
-            ) : null}
-          </tbody>
-        </table>
-      </TableWrap>
-
-      <Modal
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        title={editing ? `Edit · ${editing.name}` : "New target connection"}
-        description="The API stores this password encrypted. Leave it blank when editing to keep the current credential."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setFormOpen(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button type="submit" form="database-form" loading={saving}>
-              {editing ? "Save changes" : "Create connection"}
-            </Button>
-          </>
-        }
-      >
-        <form id="database-form" className="space-y-4" onSubmit={submit}>
-          {formError ? <ErrorBanner error={formError} /> : null}
-          <Field label="Display name" htmlFor="db-name" required>
-            <TextInput
-              id="db-name"
-              value={form.name}
-              onChange={(event) => update("name", event.target.value)}
-              placeholder="Inventory Production"
-              required
-              autoFocus
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
-            <Field label="Host" htmlFor="db-host" required>
+        <form className="grid gap-4" onSubmit={submit}>
+          {/* Row 1: Display name, Host, Port */}
+          <div className="form-row">
+            <Field label="Display name" htmlFor="f-conn-name" required>
               <TextInput
-                id="db-host"
+                id="f-conn-name"
+                value={form.name}
+                onChange={(event) => update("name", event.target.value)}
+                autoComplete="off"
+                required
+                autoFocus={!editing}
+              />
+            </Field>
+            <Field label="Host" htmlFor="f-conn-host" required>
+              <TextInput
+                id="f-conn-host"
                 value={form.host}
                 onChange={(event) => update("host", event.target.value)}
-                placeholder="targets-db"
-                className="font-mono"
+                autoComplete="off"
                 required
               />
             </Field>
-            <Field label="Port" htmlFor="db-port" required>
+            <Field label="Port" htmlFor="f-conn-port" required>
               <TextInput
-                id="db-port"
+                id="f-conn-port"
                 type="number"
                 min={1}
                 max={65535}
                 value={form.port}
                 onChange={(event) => update("port", event.target.value)}
-                className="font-mono"
                 required
               />
             </Field>
           </div>
-          <Field label="Database name" htmlFor="db-database" required>
-            <TextInput
-              id="db-database"
-              value={form.db_name}
-              onChange={(event) => update("db_name", event.target.value)}
-              placeholder="leafygo_targets"
-              className="font-mono"
-              required
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Username" htmlFor="db-username" required>
+
+          {/* Row 2: Database name, Database user */}
+          <div className="form-row">
+            <Field label="Database name" htmlFor="f-conn-dbname" required>
               <TextInput
-                id="db-username"
-                value={form.username}
-                onChange={(event) => update("username", event.target.value)}
-                placeholder="leafygo_app"
-                className="font-mono"
+                id="f-conn-dbname"
+                value={form.db_name}
+                onChange={(event) => update("db_name", event.target.value)}
+                autoComplete="off"
                 required
               />
             </Field>
+            <Field label="Database user" htmlFor="f-conn-username" required>
+              <TextInput
+                id="f-conn-username"
+                value={form.username}
+                onChange={(event) => update("username", event.target.value)}
+                autoComplete="off"
+                required
+              />
+            </Field>
+          </div>
+
+          {/* Row 3: Database password, SSL mode */}
+          <div className="form-row">
             <Field
-              label={editing ? "Password (optional)" : "Password"}
-              htmlFor="db-password"
+              label="Database password"
+              htmlFor="f-conn-password"
               required={!editing}
-              hint={editing ? "Blank keeps the existing secret." : undefined}
+              hint={
+                editing
+                  ? "Leave empty to keep the current password."
+                  : "Stored encrypted. Re-enter it if the form fails to save."
+              }
             >
               <TextInput
-                id="db-password"
+                id="f-conn-password"
                 type="password"
                 value={form.password}
                 onChange={(event) => update("password", event.target.value)}
@@ -355,41 +465,90 @@ export default function DatabasesPage() {
                 required={!editing}
               />
             </Field>
-          </div>
-          <Field label="SSL mode" htmlFor="db-ssl" hint="Use disable for local Docker targets; require or verify-full outside.">
-            <Select
-              id="db-ssl"
-              value={form.ssl_mode}
-              onChange={(event) => update("ssl_mode", event.target.value)}
+            <Field
+              label="SSL mode"
+              htmlFor="f-conn-sslmode"
+              required
+              hint="Use require or stricter for hosts outside the server."
             >
-              <option value="disable">disable</option>
-              <option value="prefer">prefer</option>
-              <option value="require">require</option>
-              <option value="verify-ca">verify-ca</option>
-              <option value="verify-full">verify-full</option>
-            </Select>
-          </Field>
-        </form>
-      </Modal>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onClose={() => { setDeleteTarget(null); setDeleteError(null); }}
-        onConfirm={() => void confirmDelete()}
-        title={`Remove ${deleteTarget?.name ?? "connection"}?`}
-        description={
-          <div className="space-y-3">
-            <p>
-              A database with an active lock or queued/running job is refused with{" "}
-              <code className="font-mono text-xs">DB_HAS_ACTIVE_WORK</code>. Databases with history
-              are soft-deleted so migration evidence is preserved.
-            </p>
-            {deleteError ? <ErrorBanner error={deleteError} /> : null}
+              <Select
+                id="f-conn-sslmode"
+                value={form.ssl_mode}
+                onChange={(event) => update("ssl_mode", event.target.value)}
+              >
+                <option value="disable">disable</option>
+                <option value="allow">allow</option>
+                <option value="prefer">prefer</option>
+                <option value="require">require</option>
+                <option value="verify-ca">verify-ca</option>
+                <option value="verify-full">verify-full</option>
+              </Select>
+            </Field>
           </div>
-        }
-        confirmLabel="Remove connection"
-        loading={deleting}
-      />
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <Button type="submit" loading={saving}>
+              {editing ? "Save changes" : "Add connection"}
+            </Button>
+            <Link to="/admin/databases" className="btn btn-ghost">
+              Cancel
+            </Link>
+          </div>
+        </form>
+      </section>
+
+      {/* Card 2: Delete connection (card--danger) when editing */}
+      {editing ? (
+        <section
+          className="card card-danger card-pad flex flex-col gap-3"
+          aria-labelledby="conn-delete-title"
+        >
+          <h2 id="conn-delete-title" className="section-title">
+            Delete connection
+          </h2>
+          <p className="m-0 text-sm leading-relaxed text-ink">
+            Connection <strong>{editing.name}</strong> and its group access, drafts, and migration
+            history will be removed from the platform. The database itself is untouched. Refused
+            while a migration is running.
+          </p>
+          <div>
+            <details className="group inline-block max-w-full">
+              <summary className="inline-flex min-h-[2.75rem] cursor-pointer list-none items-center gap-2 border-2 border-ink bg-paper px-4 py-2 font-semibold text-crimson shadow-[2px_2px_0_rgb(15_31_20/0.18)] hover:bg-crimson-wash">
+                <Trash2 className="h-4 w-4" aria-hidden />
+                <span>Delete {editing.name}</span>
+                <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="mt-2 min-w-[min(18rem,80vw)] space-y-3 border-2 border-ink bg-paper p-3 text-sm">
+                <p className="m-0">This cannot be undone.</p>
+                {deleteError ? <ErrorBanner error={deleteError} /> : null}
+                <Button
+                  variant="danger"
+                  size="sm"
+                  type="button"
+                  loading={deleting}
+                  onClick={() => void confirmDelete()}
+                >
+                  Yes, delete connection
+                </Button>
+              </div>
+            </details>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
+}
+
+export default function DatabasesPage() {
+  const { dbId } = useParams();
+  const location = useLocation();
+  const isNew = location.pathname.endsWith("/admin/databases/new");
+
+  if (isNew) {
+    return <DatabaseFormView />;
+  }
+  if (dbId) {
+    return <DatabaseFormView dbId={dbId} />;
+  }
+  return <DatabasesListView />;
 }

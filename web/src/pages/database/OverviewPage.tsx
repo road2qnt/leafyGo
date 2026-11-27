@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowRight, Database as DatabaseIcon, HardDrive, Plus, Rows3, Table2 } from "lucide-react";
+import { Activity, Plus } from "lucide-react";
 import { Link, useParams } from "react-router";
 
 import { jobApi } from "../../api/endpoints";
@@ -38,118 +38,74 @@ export default function OverviewPage() {
   const database = overview.database;
 
   const jobProgress = activeJob ? percent(activeJob.completed_batches, activeJob.total_batches) : 0;
+
   return (
-    <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Tables" value={formatNumber(overview.stats.table_count)} icon={Table2} />
+    <div className="space-y-8">
+      <div className="grid-stats">
+        <StatCard
+          label="Target status"
+          value={
+            overview.lock_state ? (
+              <span className="text-amber">{overview.lock_state.replaceAll("_", " ")}</span>
+            ) : (
+              <span className="text-leaf-700">Connected</span>
+            )
+          }
+        />
+        <StatCard
+          label="Tables and views"
+          value={formatNumber(overview.stats.table_count)}
+        />
         <StatCard
           label="Estimated rows"
           value={overview.stats.row_estimate > 0 ? formatNumber(overview.stats.row_estimate) : "—"}
-          hint="Estimator only when the target exposes row counts."
-          icon={Rows3}
         />
         <StatCard
           label="On-disk size"
-          value={overview.stats.total_size_bytes > 0 ? formatBytes(overview.stats.total_size_bytes) : "—"}
-          icon={HardDrive}
-        />
-        <StatCard
-          label="Access level"
-          value={overview.level === "edit" ? "View + Edit" : "View only"}
-          hint={overview.level === "edit" ? "Can submit migrations and run console." : "Read-only tools."}
-          icon={DatabaseIcon}
+          value={
+            overview.stats.total_size_bytes > 0 ? formatBytes(overview.stats.total_size_bytes) : "—"
+          }
         />
       </div>
 
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <Card className="p-5">
-          <SectionHeader
-            title="Active execution"
-            description="Cumulative progress for the root execution, including retries."
-            actions={
-              activeJob ? (
-                <Link
-                  to={`/databases/${dbId}/jobs/${activeJob.job_id}`}
-                  className="text-xs font-medium text-leaf-700 hover:underline"
-                >
-                  Open monitor
-                </Link>
-              ) : null
-            }
-          />
-          {activeJob ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge status={activeJob.status} />
-                <ActionBadge action={activeJob.action_type} />
-                <span className="badge badge-neutral font-mono">{activeJob.execution_mode}</span>
-                {activeJob.lock_state ? <StatusBadge status={activeJob.lock_state} kind="lock" /> : null}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-ink">{activeJob.migration_title}</p>
-                <p className="mt-0.5 font-mono text-[10px] text-muted">{activeJob.job_id}</p>
-              </div>
-              <ProgressBar
-                value={jobProgress}
-                tone={activeJob.status === "uncertain" ? "plum" : activeJob.status === "partial" ? "amber" : "leaf"}
-                label={`${activeJob.completed_batches} / ${activeJob.total_batches} batches`}
-                detail={`${formatNumber(activeJob.committed_rows)} rows`}
-              />
-              {activeJob.last_error ? (
-                <p className="rounded-lg border border-[#e9c3b9] bg-[#fbebe6] px-3 py-2 font-mono text-[11px] text-[#722c1f]">
-                  {activeJob.last_error}
-                </p>
-              ) : null}
-              <p className="text-[11px] text-muted">
-                Started {formatDateTime(activeJob.started_at)} · worker{" "}
-                <span className="font-mono">{activeJob.worker_id ?? "unclaimed"}</span>
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-line px-4 py-5">
-              <span className="badge badge-success">No active migration</span>
-              <p className="text-xs leading-relaxed text-muted">
-                The queue is clear for this database. Submit a migration or open history to review past
-                attempts.
-              </p>
-              <Link to={`/databases/${dbId}/migrations`} className="btn btn-secondary btn-sm mt-1">
-                <Plus className="h-3.5 w-3.5" /> New migration
-              </Link>
-            </div>
-          )}
-        </Card>
-
-        <Card className="p-5">
-          <SectionHeader title="Database details" />
-          <dl className="space-y-3 text-sm">
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted">Lock state</dt>
-              <dd>{overview.lock_state ? <StatusBadge status={overview.lock_state} kind="lock" /> : <span className="badge badge-success">Free</span>}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted">Host</dt>
-              <dd className="font-mono text-xs">{database.host}:{database.port}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted">Database</dt>
-              <dd className="font-mono text-xs">{database.db_name}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted">User</dt>
-              <dd className="font-mono text-xs">{database.username}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted">SSL mode</dt>
-              <dd className="font-mono text-xs">{database.ssl_mode}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted">Last updated</dt>
-              <dd className="text-xs">{formatDateTime(database.updated_at)}</dd>
-            </div>
+      <div className="split-layout min-w-0">
+        <Card className="card-pad flex flex-col gap-3">
+          <h2 className="m-0 text-xl font-semibold text-ink">Database details</h2>
+          <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [overflow-wrap:anywhere]">
+            <dt className="font-semibold text-ink-soft">Name</dt>
+            <dd className="m-0 text-ink">{database.name}</dd>
+            <dt className="font-semibold text-ink-soft">Database</dt>
+            <dd className="m-0 font-mono text-ink">{database.db_name}</dd>
+            <dt className="font-semibold text-ink-soft">Host</dt>
+            <dd className="m-0 font-mono text-ink">
+              {database.host}:{database.port}
+            </dd>
+            <dt className="font-semibold text-ink-soft">User</dt>
+            <dd className="m-0 font-mono text-ink">{database.username}</dd>
+            <dt className="font-semibold text-ink-soft">SSL mode</dt>
+            <dd className="m-0 font-mono text-ink">{database.ssl_mode}</dd>
+            <dt className="font-semibold text-ink-soft">Access level</dt>
+            <dd className="m-0 text-ink">
+              {overview.level === "edit" ? "View + Edit" : "View Only"}
+            </dd>
+            <dt className="font-semibold text-ink-soft">Lock state</dt>
+            <dd className="m-0">
+              {overview.lock_state ? (
+                <StatusBadge status={overview.lock_state} kind="lock" />
+              ) : (
+                <span className="badge badge-success">Free</span>
+              )}
+            </dd>
           </dl>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <Link to={`/databases/${dbId}/schema`} className="btn btn-secondary btn-sm">
-              <Table2 className="h-3.5 w-3.5" /> Schema
+          <div className="mt-auto flex flex-wrap gap-2 border-t border-line-soft pt-3">
+            <Link to={`/databases/${dbId}/schema`} className="btn btn-sm">
+              View schema
+            </Link>
+            <Link to={`/databases/${dbId}/data`} className="btn btn-sm">
+              Browse data
+            </Link>
+            <Link to={`/databases/${dbId}/query`} className="btn btn-sm">
+              SQL Console
             </Link>
             <Button
               variant="secondary"
@@ -163,57 +119,138 @@ export default function OverviewPage() {
             </Button>
           </div>
         </Card>
+
+        <Card className="card-pad flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="m-0 text-xl font-semibold text-ink">Active execution</h2>
+            {activeJob ? (
+              <Link
+                to={`/databases/${dbId}/jobs/${activeJob.job_id}`}
+                className="btn btn-sm"
+              >
+                Open monitor
+              </Link>
+            ) : null}
+          </div>
+
+          {activeJob ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge status={activeJob.status} />
+                <ActionBadge action={activeJob.action_type} />
+                <span className="badge badge-neutral font-mono">{activeJob.execution_mode}</span>
+                {activeJob.lock_state ? (
+                  <StatusBadge status={activeJob.lock_state} kind="lock" />
+                ) : null}
+              </div>
+              <div>
+                <p className="m-0 text-base font-semibold text-ink">{activeJob.migration_title}</p>
+                <p className="m-0 mt-0.5 font-mono text-xs text-muted">{activeJob.job_id}</p>
+              </div>
+              <ProgressBar
+                value={jobProgress}
+                tone={
+                  activeJob.status === "uncertain" || activeJob.status === "partial"
+                    ? "amber"
+                    : "leaf"
+                }
+                label={`${activeJob.completed_batches} / ${activeJob.total_batches} batches`}
+                detail={`${formatNumber(activeJob.committed_rows)} rows`}
+              />
+              {activeJob.last_error ? (
+                <div className="alert alert-danger font-mono text-xs">{activeJob.last_error}</div>
+              ) : null}
+              <p className="m-0 text-xs text-muted">
+                Started {formatDateTime(activeJob.started_at)} · worker{" "}
+                <span className="font-mono">{activeJob.worker_id ?? "unclaimed"}</span>
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="m-0">
+                <span className="badge badge-success">No active migration</span>
+              </p>
+              <p className="m-0 text-sm leading-relaxed text-muted">
+                The queue is clear for this database. Submit a migration or open history to review
+                past attempts.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-auto flex flex-wrap gap-2 border-t border-line-soft pt-3">
+            <Link to={`/databases/${dbId}/migrations`} className="btn btn-sm">
+              <Plus className="h-3.5 w-3.5" /> Migrations
+            </Link>
+            <Link to={`/databases/${dbId}/history`} className="btn btn-sm">
+              View history
+            </Link>
+          </div>
+        </Card>
       </div>
 
-      <section>
+      <section aria-labelledby="recent-caption">
         <SectionHeader
           title="Recent attempts"
           description="Every attempt is retained; supersede and rollback status never erases audit rows."
           actions={
-            <Link to={`/databases/${dbId}/history`} className="text-xs font-medium text-leaf-700 hover:underline">
+            <Link to={`/databases/${dbId}/history`} className="btn btn-sm">
               Full history
             </Link>
           }
         />
         <TableWrap>
-          <table className="table-base min-w-[760px]">
+          <table className="table-base table-stack table-compact">
+            <caption id="recent-caption">
+              Latest {recent.length} {recent.length === 1 ? "attempt" : "attempts"}
+            </caption>
             <thead>
               <tr>
-                <th className="th">Seq</th>
-                <th className="th">Migration</th>
-                <th className="th">Action</th>
-                <th className="th">Status</th>
-                <th className="th">Batches</th>
-                <th className="th">Rows</th>
-                <th className="th">By</th>
-                <th className="th">Started</th>
-                <th className="th text-right"> </th>
+                <th scope="col" className="th text-right">Seq</th>
+                <th scope="col" className="th">Migration</th>
+                <th scope="col" className="th">Action</th>
+                <th scope="col" className="th">Status</th>
+                <th scope="col" className="th text-right">Batches</th>
+                <th scope="col" className="th text-right">Rows</th>
+                <th scope="col" className="th">Executed by</th>
+                <th scope="col" className="th">Started</th>
+                <th scope="col" className="th text-right">Details</th>
               </tr>
             </thead>
             <tbody>
               {recent.map((execution) => (
-                <tr key={execution.execution_id} className="tr-hover">
-                  <td className="td font-mono text-xs text-muted">#{execution.seq_order}</td>
-                  <td className="td">
-                    <p className="text-sm font-medium text-ink">{execution.migration_title_snapshot}</p>
-                    <p className="font-mono text-[10px] text-muted">
-                      effective_seq {execution.effective_seq} · rev {execution.migration_revision}
-                    </p>
+                <tr key={execution.execution_id}>
+                  <th scope="row" data-label="Seq" className="td text-right font-mono tabular-nums">
+                    #{execution.seq_order}
+                  </th>
+                  <td data-label="Migration" className="td cell-title col-main">
+                    <div>
+                      <span className="font-semibold text-ink">
+                        {execution.migration_title_snapshot}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-xs text-muted">
+                        eff #{execution.effective_seq} · rev {execution.migration_revision}
+                      </span>
+                    </div>
                   </td>
-                  <td className="td"><ActionBadge action={execution.action_type} /></td>
-                  <td className="td"><StatusBadge status={execution.status} /></td>
-                  <td className="td font-mono text-xs">
+                  <td data-label="Action" className="td">
+                    <ActionBadge action={execution.action_type} />
+                  </td>
+                  <td data-label="Status" className="td">
+                    <StatusBadge status={execution.status} />
+                  </td>
+                  <td data-label="Batches" className="td text-right font-mono tabular-nums">
                     {execution.committed_batches}/{execution.total_batches}
                   </td>
-                  <td className="td font-mono text-xs">{formatNumber(execution.committed_rows)}</td>
-                  <td className="td text-xs">{execution.executed_by_username}</td>
-                  <td className="td text-xs text-muted">{formatDateTime(execution.started_at)}</td>
-                  <td className="td text-right">
-                    <Link
-                      to={`/databases/${dbId}/history`}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-leaf-700 hover:underline"
-                    >
-                      <ArrowRight className="h-3.5 w-3.5" />
+                  <td data-label="Rows" className="td text-right font-mono tabular-nums">
+                    {formatNumber(execution.committed_rows)}
+                  </td>
+                  <td data-label="Executed by" className="td">{execution.executed_by_username}</td>
+                  <td data-label="Started" className="td col-date text-muted">
+                    {formatDateTime(execution.started_at)}
+                  </td>
+                  <td data-label="Details" className="td cell-actions text-right whitespace-nowrap">
+                    <Link to={`/databases/${dbId}/history`} className="btn btn-sm">
+                      View
                     </Link>
                   </td>
                 </tr>
