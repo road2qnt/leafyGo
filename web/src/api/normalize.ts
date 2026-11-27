@@ -192,6 +192,9 @@ export function normalizeMigration(raw: Any, all: MigrationDefinition[]): Migrat
     batch_config: raw.batch_config ?? null,
     replaces_migration_id: replacesID,
     replaces_title: raw.replaces_title ?? (replacesID ? byId.get(replacesID)?.title ?? null : null),
+    replaces_effective_seq:
+      raw.replaces_effective_seq ?? (replacesID ? byId.get(replacesID)?.effective_seq ?? null : null),
+    is_active: Boolean(raw.is_active),
     is_superseded: Boolean(raw.is_superseded),
     superseded_by_migration_id: supersededByID,
     superseded_by_title:

@@ -183,8 +183,10 @@ export interface MigrationDefinition {
   execution_mode: ExecutionMode;
   batch_config: BatchConfig | null;
   is_immutable: boolean;
+  is_active?: boolean;
   replaces_migration_id: string | null;
   replaces_title?: string | null;
+  replaces_effective_seq?: number | null;
   is_superseded: boolean;
   superseded_by_migration_id?: string | null;
   superseded_by_title?: string | null;

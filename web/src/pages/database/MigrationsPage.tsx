@@ -64,7 +64,7 @@ export default function MigrationsPage() {
             migration.title.toLowerCase().includes(filter.toLowerCase()) ||
             migration.description.toLowerCase().includes(filter.toLowerCase()),
         )
-        .sort((a, b) => a.effective_seq - b.effective_seq || a.seq_version - b.seq_version),
+        .sort((a, b) => b.effective_seq - a.effective_seq || b.seq_version - a.seq_version),
     [migrations, filter],
   );
 
@@ -245,7 +245,7 @@ export default function MigrationsPage() {
                           ) : null}
                           {migration.replaces_title ? (
                             <span className="badge badge-info whitespace-normal">
-                              Replaces {migration.replaces_title}
+                              Replaces #{migration.replaces_effective_seq ?? migration.effective_seq}: &ldquo;{migration.replaces_title}&rdquo;
                             </span>
                           ) : null}
                           {migration.is_immutable ? (
@@ -424,9 +424,7 @@ export default function MigrationsPage() {
                         </Link>
                       )}
                       {canEdit &&
-                      (proposal.status === "rejected" ||
-                        proposal.status === "withdrawn" ||
-                        proposal.status === "draft") ? (
+                      (proposal.status === "withdrawn" || proposal.status === "draft") ? (
                         <Button
                           variant="danger"
                           size="sm"

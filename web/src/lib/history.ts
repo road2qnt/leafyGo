@@ -76,7 +76,10 @@ export function findRollbackAndForwardTargets(executions: Execution[]): {
   let topActive: Execution | null = null;
   const latestRollbackIds = new Set<string>();
   for (const execution of latestByMigration.values()) {
-    if (!execution.is_superseded && FORWARD_ACTIONS.has(execution.action_type)) {
+    if (execution.is_superseded) {
+      continue;
+    }
+    if (FORWARD_ACTIONS.has(execution.action_type)) {
       if (!topActive || execution.effective_seq > topActive.effective_seq) {
         topActive = execution;
       }

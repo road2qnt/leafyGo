@@ -536,7 +536,7 @@ func (s *Store) WithdrawProposal(ctx context.Context, dbID, proposalID uuid.UUID
 	return updated, nil
 }
 
-// DeleteMigrationProposal deletes an unexecuted, non-active proposal ('draft', 'withdrawn', or 'rejected')
+// DeleteMigrationProposal deletes an unexecuted, non-active proposal ('draft' or 'withdrawn')
 // along with its approver snapshot and approval decisions.
 func (s *Store) DeleteMigrationProposal(ctx context.Context, dbID, proposalID uuid.UUID) error {
 	tx, err := s.pool.Begin(ctx)
@@ -558,12 +558,12 @@ func (s *Store) DeleteMigrationProposal(ctx context.Context, dbID, proposalID uu
 	}
 
 	switch prop.Status {
-	case domain.ProposalDraft, domain.ProposalWithdrawn, domain.ProposalRejected:
+	case domain.ProposalDraft, domain.ProposalWithdrawn:
 		// deletable
 	case domain.ProposalPendingReview:
 		return fmt.Errorf("%w: withdraw a pending proposal before deleting it", ErrConflict)
 	default:
-		return fmt.Errorf("%w: approved or executed proposals cannot be deleted", ErrConflict)
+		return fmt.Errorf("%w: rejected, approved, or executed proposals cannot be deleted", ErrConflict)
 	}
 
 	var hasHistory bool

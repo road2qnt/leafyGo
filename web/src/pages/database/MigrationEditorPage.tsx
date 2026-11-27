@@ -169,11 +169,14 @@ export default function MigrationEditorPage() {
       (migrationsQuery.data?.migrations ?? []).filter(
         (candidate) =>
           candidate.id !== migrationId &&
-          (candidate.is_superseded ||
-            candidate.latest_status === "failed" ||
-            candidate.latest_status === "rejected"),
+          (candidate.id === form.replacesId ||
+            (!candidate.is_active &&
+              !candidate.active_proposal &&
+              (candidate.is_immutable ||
+                candidate.is_superseded ||
+                candidate.latest_status === "failed"))),
       ),
-    [migrationsQuery.data, migrationId],
+    [migrationsQuery.data, migrationId, form.replacesId],
   );
 
   const update = <K extends keyof EditorForm>(key: K, value: EditorForm[K]) => {
@@ -582,9 +585,9 @@ export default function MigrationEditorPage() {
 
           <div className="card card-pad space-y-3">
             <Field
-              label="Replaces failed migration"
+              label="Replaces failed or rolled-back migration"
               htmlFor="replaces"
-              hint="The replacement inherits the target's effective_seq. Only failed/pending chains can be superseded."
+              hint="The replacement inherits the target's effective_seq. Only failed or rolled-back inactive slots can be superseded."
             >
               <Select
                 id="replaces"

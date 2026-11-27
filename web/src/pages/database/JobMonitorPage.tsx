@@ -7,7 +7,7 @@ import {
   ShieldQuestion,
   Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { jobApi, migrationApi } from "../../api/endpoints";
@@ -41,13 +41,12 @@ import {
   formatRelative,
   truncateMiddle,
 } from "../../lib/format";
-import { findRollbackAndForwardTargets } from "../../lib/history";
 import { jobActions } from "../../lib/jobActions";
 import { actionLabel, isActiveJob, JOB_STATUS_META } from "../../lib/status";
 import { useDatabaseContext } from "./context";
 import { ResolveUncertainModal } from "./ResolveUncertainModal";
 
-type ProposalAction = Extract<ActionType, "batch_retry" | "batch_revert" | "rollback" | "forward">;
+type ProposalAction = Extract<ActionType, "batch_retry" | "batch_revert">;
 
 const proposalCopy: Record<ProposalAction, { title: string; description: string; confirm: string }> =
   {
@@ -62,18 +61,6 @@ const proposalCopy: Record<ProposalAction, { title: string; description: string;
       description:
         "The worker runs SQL Down from the highest committed batch downward. Unsafe reverts are rejected and require a corrective migration.",
       confirm: "Request batch revert",
-    },
-    rollback: {
-      title: "Rollback this migration",
-      description:
-        "LIFO rollback is only allowed when this migration is the highest active effective_seq. The rollback still needs leader approval.",
-      confirm: "Request rollback",
-    },
-    forward: {
-      title: "Forward this migration again",
-      description:
-        "A forward proposal re-applies a migration whose latest successful attempt was a normal rollback. It must respect linear effective_seq order.",
-      confirm: "Request forward",
     },
   };
 
@@ -92,14 +79,6 @@ export default function JobMonitorPage() {
       return status && isActiveJob(status) ? 1_500 : false;
     },
   });
-  const historyQuery = useQuery({
-    queryKey: ["database", dbId, "history", false],
-    queryFn: () => jobApi.history(dbId, false),
-  });
-  const { topActiveExecutionId, latestRollbackIds } = useMemo(
-    () => findRollbackAndForwardTargets(historyQuery.data?.executions ?? []),
-    [historyQuery.data],
-  );
 
   const [proposalAction, setProposalAction] = useState<ProposalAction | null>(null);
   const [reason, setReason] = useState("");
@@ -240,26 +219,6 @@ export default function JobMonitorPage() {
                 }}
               >
                 <Undo2 className="h-4 w-4" /> Revert batches
-              </Button>
-            ) : null}
-            {canEdit && actions.rollback && executionId && topActiveExecutionId === executionId ? (
-              <Button
-                onClick={() => {
-                  setProposalAction("rollback");
-                  setProposalError(null);
-                }}
-              >
-                <Undo2 className="h-4 w-4" /> Propose rollback
-              </Button>
-            ) : null}
-            {canEdit && actions.forward && executionId && latestRollbackIds.has(executionId) ? (
-              <Button
-                onClick={() => {
-                  setProposalAction("forward");
-                  setProposalError(null);
-                }}
-              >
-                <RotateCcw className="h-4 w-4" /> Propose forward
               </Button>
             ) : null}
             {canEdit && actions.resolve ? (
@@ -546,8 +505,8 @@ export default function JobMonitorPage() {
         <div className="space-y-4">
           {proposalError ? <ErrorBanner error={proposalError} /> : null}
           <Callout tone="info" title="Approval still required">
-            Retry, revert, and rollback are proposals. Every required group leader must approve
-            before a worker executes them.
+            Batch retry and revert are proposals. Every required group leader must approve before a
+            worker executes them.
           </Callout>
           <Field label="Reason / note for approvers" htmlFor="job-proposal-reason">
             <Textarea

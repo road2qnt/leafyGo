@@ -62,6 +62,8 @@ export default function ProposalReviewPage() {
   const [comment, setComment] = useState("");
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
   const [decisionError, setDecisionError] = useState<unknown>(null);
+  const [actionError, setActionError] = useState<unknown>(null);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
   const [withdrawing, setWithdrawing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -108,7 +110,7 @@ export default function ProposalReviewPage() {
 
   const withdraw = async () => {
     setWithdrawing(true);
-    setDecisionError(null);
+    setActionError(null);
     try {
       await migrationApi.withdraw(dbId, proposalId);
       await migrationApi.deleteProposal(dbId, proposalId);
@@ -121,7 +123,7 @@ export default function ProposalReviewPage() {
       toast.success("Proposal withdrawn", "The proposal was removed and all approvals were discarded.");
       navigate(`/databases/${dbId}/migrations`, { replace: true });
     } catch (error) {
-      setDecisionError(error);
+      setActionError(error);
     } finally {
       setWithdrawing(false);
     }
@@ -129,7 +131,7 @@ export default function ProposalReviewPage() {
 
   const deleteProposal = async () => {
     setDeleting(true);
-    setDecisionError(null);
+    setDeleteError(null);
     try {
       await migrationApi.deleteProposal(dbId, proposalId);
       setDeleteOpen(false);
@@ -137,7 +139,7 @@ export default function ProposalReviewPage() {
       toast.success("Proposal deleted", "The proposal was removed.");
       navigate(`/databases/${dbId}/migrations`, { replace: true });
     } catch (error) {
-      setDecisionError(error);
+      setDeleteError(error);
     } finally {
       setDeleting(false);
     }
@@ -156,17 +158,22 @@ export default function ProposalReviewPage() {
   }
 
   const { proposal, migration, approvers, can_approve, can_withdraw } = detailQuery.data;
+  const myApproverRows = approvers.filter(
+    (row) => row.leader_id === user?.id || (Boolean(user?.username) && row.leader_username === user?.username),
+  );
+  const myDecision =
+    myApproverRows.find((row) => row.decision === "rejected")?.decision ??
+    myApproverRows.find((row) => row.decision === "approved")?.decision ??
+    null;
   const canApprove =
     can_approve ||
-    approvers.some((row) => row.leader_id === user?.id && row.decision === null);
+    myApproverRows.some((row) => row.decision === null);
   const canWithdraw =
     can_withdraw ||
     (proposal.status === "pending_review" && proposal.proposed_by_username === user?.username);
   const canDelete =
     canEdit &&
-    (proposal.status === "rejected" ||
-      proposal.status === "withdrawn" ||
-      proposal.status === "draft");
+    (proposal.status === "withdrawn" || proposal.status === "draft");
   const summary = proposal.approval_summary;
   const reviewOpen = proposal.status === "pending_review";
   const activeJobId = proposal.job_id ?? queuedJobID;
@@ -223,7 +230,7 @@ export default function ProposalReviewPage() {
               <Button
                 variant="danger"
                 onClick={() => {
-                  setDecisionError(null);
+                  setDeleteError(null);
                   setDeleteOpen(true);
                 }}
               >
@@ -263,8 +270,8 @@ export default function ProposalReviewPage() {
         </Callout>
       ) : null}
 
-      {decisionError ? (
-        <ErrorBanner error={decisionError} onDismiss={() => setDecisionError(null)} />
+      {actionError ? (
+        <ErrorBanner error={actionError} onDismiss={() => setActionError(null)} />
       ) : null}
 
       <div className="split-layout min-w-0">
@@ -292,7 +299,17 @@ export default function ProposalReviewPage() {
                   },
                   {
                     label: "Replaces",
-                    value: proposal.replaces_title ?? migration.replaces_title ?? "—",
+                    value:
+                      proposal.replaces_title ?? migration.replaces_title ? (
+                        <>
+                          <span className="font-mono">
+                            #{migration.replaces_effective_seq ?? proposal.effective_seq}
+                          </span>
+                          : &ldquo;{proposal.replaces_title ?? migration.replaces_title}&rdquo;
+                        </>
+                      ) : (
+                        "—"
+                      ),
                   },
                   {
                     label: "Irreversible",
@@ -306,11 +323,15 @@ export default function ProposalReviewPage() {
               />
               {proposal.reason ? (
                 <Callout tone="neutral" title="Proposer note">
-                  {proposal.reason}
+                  <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                    {proposal.reason}
+                  </span>
                 </Callout>
               ) : null}
               {migration.description ? (
-                <p className="m-0 text-sm leading-relaxed text-ink-soft">{migration.description}</p>
+                <p className="m-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-relaxed text-ink-soft">
+                  {migration.description}
+                </p>
               ) : null}
             </div>
           </div>
@@ -434,7 +455,23 @@ export default function ProposalReviewPage() {
                       <ThumbsUp className="h-4 w-4" /> Approve
                     </Button>
                   </div>
+                  {decisionError ? (
+                    <div className="mt-3">
+                      <ErrorBanner
+                        error={decisionError}
+                        onDismiss={() => setDecisionError(null)}
+                      />
+                    </div>
+                  ) : null}
                 </>
+              ) : myDecision === "approved" ? (
+                <Callout tone="success" title="You approved this proposal">
+                  Your approval has been recorded. Waiting for the remaining required group leaders.
+                </Callout>
+              ) : myDecision === "rejected" ? (
+                <Callout tone="danger" title="You rejected this proposal">
+                  Your rejection has been recorded.
+                </Callout>
               ) : (
                 <Callout tone="neutral" title="Not your action">
                   {canEdit
@@ -446,6 +483,19 @@ export default function ProposalReviewPage() {
           ) : (
             <Card className="p-4 sm:p-5">
               <h2 className="section-title">Workflow state</h2>
+              {myDecision === "approved" ? (
+                <div className="mt-3">
+                  <Callout tone="success" title="You approved this proposal">
+                    Your approval was recorded on this proposal.
+                  </Callout>
+                </div>
+              ) : myDecision === "rejected" ? (
+                <div className="mt-3">
+                  <Callout tone="danger" title="You rejected this proposal">
+                    Your rejection was recorded on this proposal.
+                  </Callout>
+                </div>
+              ) : null}
               <p className="m-0 mt-2 text-sm leading-relaxed text-ink-soft">
                 This proposal is <strong>{proposal.status.replaceAll("_", " ")}</strong>.{" "}
                 {activeJobId ? (
@@ -496,7 +546,7 @@ export default function ProposalReviewPage() {
         open={deleteOpen}
         onClose={() => {
           setDeleteOpen(false);
-          setDecisionError(null);
+          setDeleteError(null);
         }}
         onConfirm={() => void deleteProposal()}
         title="Delete proposal?"
@@ -506,7 +556,7 @@ export default function ProposalReviewPage() {
               Permanently delete this <strong>{proposal.status.replaceAll("_", " ")}</strong>{" "}
               proposal for <strong>{proposal.migration_title}</strong>? This cannot be undone.
             </p>
-            {decisionError ? <ErrorBanner error={decisionError} /> : null}
+            {deleteError ? <ErrorBanner error={deleteError} /> : null}
           </div>
         }
         confirmLabel="Delete proposal"

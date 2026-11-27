@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Execution } from "../api/types";
-import { applyHideRollback } from "./history";
+import { applyHideRollback, findRollbackAndForwardTargets } from "./history";
 
 function execution(overrides: Partial<Execution> & Pick<Execution, "execution_id" | "action_type" | "status" | "seq_order">): Execution {
   return {
@@ -82,5 +82,31 @@ describe("applyHideRollback", () => {
   it("keeps an unsuccessful revert visible", () => {
     const failedRevert = execution({ execution_id: "F1", action_type: "batch_revert", status: "failed", seq_order: 3 });
     expect(applyHideRollback([failedRevert, e1], true).map((e) => e.execution_id)).toEqual(["F1", "E1"]);
+  });
+});
+
+describe("findRollbackAndForwardTargets", () => {
+  it("excludes superseded rolled-back migrations from forward targets", () => {
+    const rolledBack = execution({
+      execution_id: "R1",
+      migration_id: "mig-1",
+      action_type: "rollback",
+      status: "success",
+      seq_order: 2,
+      effective_seq: 1,
+      is_superseded: true,
+    });
+    const replacement = execution({
+      execution_id: "A2",
+      migration_id: "mig-2",
+      action_type: "apply",
+      status: "success",
+      seq_order: 3,
+      effective_seq: 1,
+      is_superseded: false,
+    });
+    const targets = findRollbackAndForwardTargets([replacement, rolledBack]);
+    expect(targets.topActiveExecutionId).toBe("A2");
+    expect(targets.latestRollbackIds.has("R1")).toBe(false);
   });
 });
