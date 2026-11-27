@@ -8,10 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/attribute"
 
 	"leafygo/internal/domain"
 	"leafygo/internal/store"
 	"leafygo/internal/target"
+	"leafygo/internal/telemetry"
 )
 
 const probePollInterval = 500 * time.Millisecond
@@ -87,12 +89,27 @@ func (w *Worker) recoverLock(ctx context.Context, l domain.DBLock, reprobe bool)
 
 	work, err := w.st.LoadJobWork(ctx, l.JobID)
 	if err != nil {
-		log.Error("load job for recovery", "error", err)
+		log.ErrorContext(ctx, "recovery.load_job_failed", "error", err)
 		return
 	}
-	log = log.With("action", work.Job.ActionType, "mode", work.Job.ExecutionMode)
+	ctx = telemetry.ExtractTraceContext(ctx, work.Job.TraceParent, work.Job.TraceState)
+	if work.Job.CorrelationID != "" {
+		ctx = telemetry.WithCorrelationID(ctx, work.Job.CorrelationID)
+	}
+	ctx = telemetry.WithActor(ctx, "worker:"+w.cfg.ID)
+	ctx = telemetry.WithDatabase(ctx, work.Job.DBID.String(), work.DB.Name)
+	ctx, span := telemetry.StartSpan(ctx, "worker.recover_lock",
+		attribute.String("job_id", l.JobID.String()),
+		attribute.String("execution_id", l.ExecutionID.String()),
+		attribute.String("db_id", l.DBID.String()),
+		attribute.String("db_name", work.DB.Name),
+		attribute.Bool("reprobe", reprobe),
+	)
+	defer span.End()
+
+	log = log.With("action", work.Job.ActionType, "mode", work.Job.ExecutionMode, "correlation_id", work.Job.CorrelationID)
 	if !reprobe && work.ExecutionStatus == domain.JobQueued {
-		w.requeue(ctx, log, lease, work.Job.RetryCount,
+		w.requeue(ctx, log, lease, work.Job.RetryCount, work.Job.ExecutionMode, work.Job.ActionType, work.DB.Name,
 			jobErr(CodeExecutionLeaseRecovery, "worker stopped before the execution started"))
 		return
 	}
@@ -190,7 +207,7 @@ func (w *Worker) settleNormal(ctx context.Context, log *slog.Logger, lease store
 		log.Info("no evidence, the execution did not commit")
 		r.finish(store.Outcome{Status: domain.JobFailed, ErrText: (&JobError{Code: CodeUncertain, Message: "the commit did not reach the target"}).Error()})
 	default:
-		w.requeue(ctx, log, lease, work.Job.RetryCount,
+		w.requeue(ctx, log, lease, work.Job.RetryCount, work.Job.ExecutionMode, work.Job.ActionType, work.DB.Name,
 			jobErr(CodeExecutionLeaseRecovery, "worker lost its lease before committing"))
 	}
 }
@@ -209,7 +226,7 @@ func (w *Worker) resumeBatches(ctx context.Context, log *slog.Logger, lease stor
 		log.Error("parse batch config for recovery", "error", err)
 		return false
 	}
-	r := &run{w: w, ctx: ctx, log: log, work: work, lease: lease, batch: cfg}
+	r := &run{w: w, ctx: ctx, log: log, work: work, lease: lease, batch: cfg, startedAt: time.Now()}
 	if err := r.open(password); err != nil {
 		w.holdUncertain(ctx, log, lease, false, err)
 		return false

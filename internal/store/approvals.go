@@ -11,8 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"leafygo/internal/domain"
+	"leafygo/internal/telemetry"
 )
 
 type SubmitProposalInput struct {
@@ -1152,7 +1155,22 @@ func (s *Store) ApproveProposal(ctx context.Context, in ApproveProposalInput) (A
 		return ApproveProposalResult{}, fmt.Errorf("insert migration_executions: %w", err)
 	}
 
-	job, err := s.EnqueueMigrationJobTx(ctx, tx, EnqueueInput{
+	pubCtx, pubSpan := telemetry.StartSpan(ctx, "queue.publish",
+		attribute.String("db_id", in.DBID.String()),
+		attribute.String("db_name", dbName),
+		attribute.String("proposal_id", prop.ID.String()),
+		attribute.String("migration_id", def.ID.String()),
+		attribute.String("execution_id", execID.String()),
+		attribute.String("action", prop.ActionType),
+		attribute.String("mode", def.ExecutionMode),
+	)
+	traceParent, traceState := telemetry.InjectTraceContext(pubCtx)
+	if traceParent == "" {
+		traceParent = in.TraceParent
+		traceState = in.TraceState
+	}
+
+	job, err := s.EnqueueMigrationJobTx(pubCtx, tx, EnqueueInput{
 		DBID:            in.DBID,
 		ProposalID:      prop.ID,
 		MigrationID:     def.ID,
@@ -1160,13 +1178,18 @@ func (s *Store) ApproveProposal(ctx context.Context, in ApproveProposalInput) (A
 		RootExecutionID: rootExecID,
 		ActionType:      prop.ActionType,
 		ExecutionMode:   def.ExecutionMode,
-		TraceParent:     in.TraceParent,
-		TraceState:      in.TraceState,
+		TraceParent:     traceParent,
+		TraceState:      traceState,
 		CorrelationID:   in.CorrelationID,
 	})
 	if err != nil {
+		pubSpan.RecordError(err)
+		pubSpan.SetStatus(codes.Error, err.Error())
+		pubSpan.End()
 		return ApproveProposalResult{}, err
 	}
+	pubSpan.SetAttributes(attribute.String("job_id", job.ID.String()))
+	pubSpan.End()
 
 	updatedProp, err := s.getProposalTx(ctx, tx, in.DBID, prop.ID)
 	if err != nil {

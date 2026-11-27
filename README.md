@@ -83,7 +83,7 @@ make obs-up
 # Grafana http://localhost:3000, Prometheus http://localhost:9090
 ```
 
-Panduan lengkap: [deploy/observability/README.md](deploy/observability/README.md).
+Panduan lengkap, contoh output log JSON, span OpenTelemetry, korelasi log/trace, dan sampel metrik Prometheus: [deploy/observability/README.md](deploy/observability/README.md).
 
 ## Setup
 

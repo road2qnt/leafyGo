@@ -55,6 +55,7 @@ type Config struct {
 
 type WorkerConfig struct {
 	ID                string
+	MetricsAddr       string
 	MaxConcurrentJobs int
 	PollInterval      time.Duration
 	LeaseTTL          time.Duration
@@ -173,7 +174,10 @@ func Load() (Config, error) {
 }
 
 func loadWorkerConfig() (WorkerConfig, error) {
-	w := WorkerConfig{ID: os.Getenv("WORKER_ID")}
+	w := WorkerConfig{
+		ID:          os.Getenv("WORKER_ID"),
+		MetricsAddr: env("WORKER_METRICS_ADDR", ":8081"),
+	}
 	var err error
 	if w.MaxConcurrentJobs, err = positiveIntEnv("WORKER_MAX_CONCURRENT_JOBS", 4); err != nil {
 		return WorkerConfig{}, err

@@ -6,7 +6,11 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"leafygo/internal/domain"
+	"leafygo/internal/telemetry"
 )
 
 // ServiceOptions defines operational configuration for the query console service.
@@ -93,7 +97,7 @@ func (s *Service) Execute(ctx context.Context, in ExecuteInput) (Result, error) 
 	}
 	defer func() { <-s.sem }()
 
-	// 4. Target execution
+	// 4. Target execution with structured SQL logging and OpenTelemetry span
 	limits := Limits{
 		Timeout:        s.opts.QueryTimeout,
 		MaxRows:        s.opts.MaxRows,
@@ -101,34 +105,38 @@ func (s *Service) Execute(ctx context.Context, in ExecuteInput) (Result, error) 
 		MaxResultBytes: s.opts.MaxResultBytes,
 	}
 
+	spanCtx, span := telemetry.StartSpan(ctx, "target.db.query",
+		attribute.String("sql_source", string(telemetry.SQLSourceQueryConsole)),
+		attribute.String("db_id", in.DB.ID.String()),
+		attribute.String("db_name", in.DB.Name),
+	)
+	defer span.End()
+
+	meta := telemetry.SQLMeta{
+		Source: telemetry.SQLSourceQueryConsole,
+		Query:  stmt,
+		Actor:  "user:" + in.Actor.Username,
+		DBID:   in.DB.ID.String(),
+		DBName: in.DB.Name,
+	}
+	telemetry.LogSQLStartWith(s.logger, spanCtx, meta)
+
 	start := time.Now()
-	res, execErr := s.runner.Execute(ctx, in.DB, stmt, limits)
+	res, execErr := s.runner.Execute(spanCtx, in.DB, stmt, limits)
 	duration := time.Since(start)
 
-	// 5. Safe metadata-only logging (never log SQL, rows, DSN, or passwords)
+	// 5. Structured SQL result + read-only transaction rollback log (telemetry scrubs credentials/PII)
+	telemetry.LogSQLResultWith(s.logger, spanCtx, meta, int64(res.RowCount), duration, execErr)
+	telemetry.LogSQLTxEndWith(s.logger, spanCtx, meta, "rollback", duration, execErr)
+
 	if execErr != nil {
-		sqlStateClass := ""
-		var tgtErr *TargetError
-		if errorsAs(execErr, &tgtErr) && len(tgtErr.Code) >= 2 {
-			sqlStateClass = tgtErr.Code[:2]
-		}
-		s.logger.WarnContext(ctx, "query console execution failed",
-			"db_id", in.DB.ID.String(),
-			"actor_id", in.Actor.ID.String(),
-			"duration_ms", duration.Milliseconds(),
-			"status", "error",
-			"sqlstate_class", sqlStateClass,
-		)
+		span.RecordError(execErr)
+		span.SetStatus(codes.Error, execErr.Error())
 		return Result{}, execErr
 	}
-
-	s.logger.InfoContext(ctx, "query console execution succeeded",
-		"db_id", in.DB.ID.String(),
-		"actor_id", in.Actor.ID.String(),
-		"duration_ms", res.Duration.Milliseconds(),
-		"row_count", res.RowCount,
-		"truncated", res.Truncated,
-		"status", "success",
+	span.SetAttributes(
+		attribute.Int("row_count", res.RowCount),
+		attribute.Bool("truncated", res.Truncated),
 	)
 
 	return res, nil

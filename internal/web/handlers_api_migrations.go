@@ -10,6 +10,7 @@ import (
 	"leafygo/internal/domain"
 	"leafygo/internal/migration"
 	"leafygo/internal/store"
+	"leafygo/internal/telemetry"
 )
 
 func (s *Server) writeMigrationWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
@@ -367,13 +368,18 @@ func (s *Server) handleAPIProposalApprove(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	traceParent, traceState := telemetry.InjectTraceContext(r.Context())
+	if traceParent == "" {
+		traceParent = strings.TrimSpace(r.Header.Get("traceparent"))
+		traceState = strings.TrimSpace(r.Header.Get("tracestate"))
+	}
 	res, err := s.migrations.ApproveProposal(r.Context(), store.ApproveProposalInput{
 		DBID:          db.ID,
 		ProposalID:    pid,
 		Actor:         *user,
 		Comment:       req.Comment,
-		TraceParent:   strings.TrimSpace(r.Header.Get("traceparent")),
-		TraceState:    strings.TrimSpace(r.Header.Get("tracestate")),
+		TraceParent:   traceParent,
+		TraceState:    traceState,
 		CorrelationID: correlationIDFromRequest(r),
 	})
 	if err != nil {

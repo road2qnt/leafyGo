@@ -14,8 +14,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"leafygo/internal/domain"
+	"leafygo/internal/telemetry"
 )
 
 const (
@@ -1099,10 +1102,35 @@ func RunPreReviewDryRun(
 	}
 
 	for _, script := range scripts {
-		if _, err := conn.Exec(ctx, script, pgx.QueryExecModeSimpleProtocol); err != nil {
+		spanCtx, span := telemetry.StartSpan(ctx, "target.db.query",
+			attribute.String("sql_source", string(telemetry.SQLSourceDryRun)),
+			attribute.String("db_id", db.ID.String()),
+			attribute.String("db_name", db.Name),
+			attribute.String("migration_id", def.ID.String()),
+			attribute.String("action", actionType),
+		)
+		meta := telemetry.SQLMeta{
+			Source:      telemetry.SQLSourceDryRun,
+			Query:       script,
+			DBID:        db.ID.String(),
+			DBName:      db.Name,
+			MigrationID: def.ID.String(),
+		}
+		telemetry.LogSQLStart(spanCtx, meta)
+		start := time.Now()
+		tag, err := conn.Exec(spanCtx, script, pgx.QueryExecModeSimpleProtocol)
+		dur := time.Since(start)
+		telemetry.LogSQLResult(spanCtx, meta, tag.RowsAffected(), dur, err)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			rollbackTx()
+			telemetry.LogSQLTxEnd(spanCtx, meta, "rollback", dur, err)
+			span.End()
 			return classifyDryRunExecError(err)
 		}
+		telemetry.LogSQLTxEnd(spanCtx, meta, "rollback", dur, nil)
+		span.End()
 	}
 
 	rollbackTx()

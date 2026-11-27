@@ -159,7 +159,7 @@ func TestServiceConcurrencyLimit(t *testing.T) {
 	close(blockCh)
 }
 
-func TestServiceLoggingDoesNotLeakSQLOrRows(t *testing.T) {
+func TestServiceLoggingEmitsStructuredSQLAndRedactsSecrets(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
@@ -172,25 +172,27 @@ func TestServiceLoggingDoesNotLeakSQLOrRows(t *testing.T) {
 	}
 	svc := queryconsole.NewService(mock, logger, queryconsole.ServiceOptions{})
 
-	secretSQL := "SELECT 'super_secret_query_string'"
+	sqlWithSecret := "SELECT id FROM users WHERE password = 'super_secret_password_123'"
 	_, err := svc.Execute(context.Background(), queryconsole.ExecuteInput{
-		Actor: domain.User{ID: uuid.New()},
-		DB:    domain.DBConnection{ID: uuid.New()},
+		Actor: domain.User{ID: uuid.New(), Username: "andi"},
+		DB:    domain.DBConnection{ID: uuid.New(), Name: "storefront"},
 		Level: domain.LevelView,
-		SQL:   secretSQL,
+		SQL:   sqlWithSecret,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	logOutput := buf.String()
-	if strings.Contains(logOutput, "super_secret_query_string") {
-		t.Fatalf("log output leaked SQL query: %s", logOutput)
+	if strings.Contains(logOutput, "super_secret_password_123") {
+		t.Fatalf("log output leaked credential literal: %s", logOutput)
 	}
 	if strings.Contains(logOutput, "secret_value_123") {
 		t.Fatalf("log output leaked row data: %s", logOutput)
 	}
-	if !strings.Contains(logOutput, "status=success") {
-		t.Fatalf("expected status=success in log output: %s", logOutput)
+	for _, want := range []string{"sql.exec.start", "sql.exec.result", "sql.tx.rollback", "sql_source=query_console", "status=success", "[REDACTED]"} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("expected %q in log output: %s", want, logOutput)
+		}
 	}
 }

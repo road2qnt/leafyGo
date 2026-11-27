@@ -84,11 +84,11 @@ function toInput(form: EditorForm): MigrationInput {
     batch_config:
       form.mode === "batch"
         ? {
-            table_name: form.tableName.trim(),
-            cursor_col: form.cursorCol.trim(),
-            batch_size: Number(form.batchSize),
-            updated_at_col: form.updatedAtCol.trim() || null,
-          }
+          table_name: form.tableName.trim(),
+          cursor_col: form.cursorCol.trim(),
+          batch_size: Number(form.batchSize),
+          updated_at_col: form.updatedAtCol.trim() || null,
+        }
         : null,
     replaces_migration_id: form.replacesId || null,
   };
@@ -164,20 +164,39 @@ export default function MigrationEditorPage() {
   const canEdit = overview.level === "edit";
   const readOnly = !canEdit || locked;
 
-  const replaceOptions = useMemo(
-    () =>
-      (migrationsQuery.data?.migrations ?? []).filter(
+  const replaceOptions = useMemo(() => {
+    const others = (migrationsQuery.data?.migrations ?? []).filter(
+      (candidate) => candidate.id !== migrationId,
+    );
+    const activeSlots = new Set<number>();
+    const slotSet = new Set<number>();
+    for (const candidate of others) {
+      slotSet.add(candidate.effective_seq);
+      if (!candidate.is_superseded && candidate.is_active) {
+        activeSlots.add(candidate.effective_seq);
+      }
+    }
+    const lowestInactiveSeq =
+      [...slotSet].sort((a, b) => a - b).find((seq) => !activeSlots.has(seq)) ?? null;
+    const lowestSlotBlocked =
+      lowestInactiveSeq !== null &&
+      others.some(
         (candidate) =>
-          candidate.id !== migrationId &&
-          (candidate.id === form.replacesId ||
-            (!candidate.is_active &&
-              !candidate.is_superseded &&
-              !candidate.active_proposal &&
-              (candidate.is_immutable ||
-                candidate.latest_status === "failed"))),
-      ),
-    [migrationsQuery.data, migrationId, form.replacesId],
-  );
+          candidate.effective_seq === lowestInactiveSeq && Boolean(candidate.active_proposal),
+      );
+
+    return others.filter(
+      (candidate) =>
+        candidate.id === form.replacesId ||
+        (!lowestSlotBlocked &&
+          lowestInactiveSeq !== null &&
+          candidate.effective_seq === lowestInactiveSeq &&
+          !candidate.is_active &&
+          !candidate.is_superseded &&
+          !candidate.active_proposal &&
+          (candidate.is_immutable || candidate.latest_status === "failed")),
+    );
+  }, [migrationsQuery.data, migrationId, form.replacesId]);
 
   const update = <K extends keyof EditorForm>(key: K, value: EditorForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -438,11 +457,10 @@ export default function MigrationEditorPage() {
                       type="button"
                       disabled={readOnly}
                       onClick={() => update("mode", mode)}
-                      className={`min-h-[2.75rem] cursor-pointer px-4 py-2 text-sm font-semibold ${
-                        form.mode === mode
+                      className={`min-h-[2.75rem] cursor-pointer px-4 py-2 text-sm font-semibold ${form.mode === mode
                           ? "bg-leaf-700 text-paper"
                           : "bg-paper text-ink hover:bg-leaf-50"
-                      }`}
+                        }`}
                     >
                       {mode === "normal" ? "Normal" : "Per batch"}
                     </button>

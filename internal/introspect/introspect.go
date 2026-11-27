@@ -5,9 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
+	"leafygo/internal/telemetry"
 )
 
 var (
@@ -87,12 +92,21 @@ const relationColumns = `
 	has_table_privilege(c.oid, 'SELECT')`
 
 func ListTables(ctx context.Context, pool *pgxpool.Pool) ([]Table, error) {
-	rows, err := pool.Query(ctx, `
-		select `+relationColumns+`
-		from pg_class c join pg_namespace n on n.oid=c.relnamespace
-		where `+relationFilter+`
-		order by n.nspname, c.relname`)
+	ctx, span := telemetry.StartSpan(ctx, "target.db.query",
+		attribute.String("sql_source", string(telemetry.SQLSourceTargetViewer)),
+		attribute.String("viewer.op", "list_tables"),
+	)
+	defer span.End()
+
+	query := `select ` + relationColumns + ` from pg_class c join pg_namespace n on n.oid=c.relnamespace where ` + relationFilter + ` order by n.nspname, c.relname`
+	meta := telemetry.SQLMeta{Source: telemetry.SQLSourceTargetViewer, Query: query}
+	telemetry.LogSQLStart(ctx, meta)
+	start := time.Now()
+	rows, err := pool.Query(ctx, query)
 	if err != nil {
+		telemetry.LogSQLResult(ctx, meta, 0, time.Since(start), err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 	defer rows.Close()
@@ -101,14 +115,21 @@ func ListTables(ctx context.Context, pool *pgxpool.Pool) ([]Table, error) {
 	for rows.Next() {
 		var t Table
 		if err := rows.Scan(&t.Schema, &t.Name, &t.Kind, &t.CanSelect); err != nil {
+			telemetry.LogSQLResult(ctx, meta, int64(len(out)), time.Since(start), err)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, err
 		}
 		out = append(out, t)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		telemetry.LogSQLResult(ctx, meta, int64(len(out)), time.Since(start), err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	telemetry.LogSQLResult(ctx, meta, int64(len(out)), time.Since(start), nil)
 	for i := range out {
 		if out[i].CanSelect {
 			out[i].RowCount = countRows(ctx, pool, out[i].Schema, out[i].Name)
@@ -255,18 +276,53 @@ func ReadPage(ctx context.Context, pool *pgxpool.Pool, d TableDetail, page, page
 	}
 	query += " limit $1 offset $2"
 
+	ctx, span := telemetry.StartSpan(ctx, "target.db.query",
+		attribute.String("sql_source", string(telemetry.SQLSourceTargetViewer)),
+		attribute.String("viewer.op", "read_page"),
+		attribute.String("viewer.table", d.Schema+"."+d.Name),
+	)
+	defer span.End()
+
+	params := []any{pageSize + 1, (page - 1) * pageSize}
+	meta := telemetry.SQLMeta{
+		Source: telemetry.SQLSourceTargetViewer,
+		Query:  query,
+		Params: params,
+	}
+	telemetry.LogSQLStart(ctx, meta)
+	start := time.Now()
+
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
+		telemetry.LogSQLResult(ctx, meta, 0, time.Since(start), err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return Page{}, err
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	var retErr error
+	defer func() {
+		rbErr := tx.Rollback(context.WithoutCancel(ctx))
+		if retErr != nil {
+			telemetry.LogSQLTxEnd(ctx, meta, "rollback", time.Since(start), retErr)
+		} else {
+			telemetry.LogSQLTxEnd(ctx, meta, "rollback", time.Since(start), rbErr)
+		}
+	}()
 
 	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '3s'"); err != nil {
+		retErr = err
+		telemetry.LogSQLResult(ctx, meta, 0, time.Since(start), err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return Page{}, err
 	}
 
-	rows, err := tx.Query(ctx, query, pageSize+1, (page-1)*pageSize)
+	rows, err := tx.Query(ctx, query, params...)
 	if err != nil {
+		retErr = err
+		telemetry.LogSQLResult(ctx, meta, 0, time.Since(start), err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return Page{}, err
 	}
 	defer rows.Close()
@@ -282,6 +338,10 @@ func ReadPage(ctx context.Context, pool *pgxpool.Pool, d TableDetail, page, page
 			dest[i] = &vals[i]
 		}
 		if err := rows.Scan(dest...); err != nil {
+			retErr = err
+			telemetry.LogSQLResult(ctx, meta, int64(len(out.Rows)), time.Since(start), err)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return Page{}, err
 		}
 		row := make([]Cell, len(vals))
@@ -294,5 +354,14 @@ func ReadPage(ctx context.Context, pool *pgxpool.Pool, d TableDetail, page, page
 		}
 		out.Rows = append(out.Rows, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		retErr = err
+		telemetry.LogSQLResult(ctx, meta, int64(len(out.Rows)), time.Since(start), err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return out, err
+	}
+	telemetry.LogSQLResult(ctx, meta, int64(len(out.Rows)), time.Since(start), nil)
+	span.SetAttributes(attribute.Int("row_count", len(out.Rows)))
+	return out, nil
 }

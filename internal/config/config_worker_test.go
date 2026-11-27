@@ -7,7 +7,7 @@ import (
 )
 
 var workerEnvKeys = []string{
-	"WORKER_ID", "WORKER_MAX_CONCURRENT_JOBS", "WORKER_POLL_INTERVAL", "WORKER_LEASE_TTL",
+	"WORKER_ID", "WORKER_METRICS_ADDR", "WORKER_MAX_CONCURRENT_JOBS", "WORKER_POLL_INTERVAL", "WORKER_LEASE_TTL",
 	"WORKER_HEARTBEAT_INTERVAL", "WORKER_RECOVERY_INTERVAL", "WORKER_REPROBE_INTERVAL",
 	"WORKER_PROBE_TIMEOUT", "WORKER_EXEC_TIMEOUT", "WORKER_SHUTDOWN_TIMEOUT",
 }
@@ -27,6 +27,7 @@ func TestLoadWorkerDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	want := WorkerConfig{
+		MetricsAddr:       ":8081",
 		MaxConcurrentJobs: 4,
 		PollInterval:      2 * time.Second,
 		LeaseTTL:          15 * time.Second,

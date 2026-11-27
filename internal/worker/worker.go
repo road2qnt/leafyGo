@@ -12,11 +12,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"leafygo/internal/config"
 	"leafygo/internal/domain"
 	"leafygo/internal/secret"
 	"leafygo/internal/store"
+	"leafygo/internal/telemetry"
 )
 
 type Worker struct {
@@ -26,6 +29,7 @@ type Worker struct {
 	cfg            config.WorkerConfig
 	connectTimeout time.Duration
 	log            *slog.Logger
+	metrics        *telemetry.Metrics
 
 	sem      chan struct{}
 	wake     chan struct{}
@@ -57,6 +61,9 @@ func New(st *store.Store, box *secret.Box, databaseURL string, cfg config.Worker
 }
 
 func (w *Worker) ID() string { return w.cfg.ID }
+
+// SetMetrics attaches the Prometheus metrics collector to the worker.
+func (w *Worker) SetMetrics(m *telemetry.Metrics) { w.metrics = m }
 
 // Runs until ctx is cancelled, then stops claiming and gives running jobs ShutdownTimeout to finish.
 func (w *Worker) Run(ctx context.Context) error {
@@ -167,43 +174,113 @@ func (w *Worker) listenOnce(ctx context.Context) error {
 }
 
 func (w *Worker) process(ctx context.Context, claimed *store.ClaimedJob) {
+	claimedAt := time.Now()
 	job := claimed.Job
+
+	ctx = telemetry.ExtractTraceContext(ctx, job.TraceParent, job.TraceState)
+	if job.CorrelationID != "" {
+		ctx = telemetry.WithCorrelationID(ctx, job.CorrelationID)
+	}
+	ctx = telemetry.WithActor(ctx, "worker:"+w.cfg.ID)
+	ctx = telemetry.WithDatabase(ctx, job.DBID.String(), "")
+
+	ctx, span := telemetry.StartSpan(ctx, "worker.process_job",
+		attribute.String("worker_id", w.cfg.ID),
+		attribute.String("job_id", job.ID.String()),
+		attribute.String("execution_id", job.ExecutionID.String()),
+		attribute.String("root_execution_id", job.RootExecutionID.String()),
+		attribute.String("migration_id", job.MigrationID.String()),
+		attribute.String("db_id", job.DBID.String()),
+		attribute.String("action", job.ActionType),
+		attribute.String("mode", job.ExecutionMode),
+		attribute.Int("attempt", job.RetryCount+1),
+	)
+	defer span.End()
+
 	log := w.log.With("job_id", job.ID, "execution_id", job.ExecutionID, "root_execution_id", job.RootExecutionID,
-		"db_id", job.DBID, "action", job.ActionType, "mode", job.ExecutionMode, "attempt", job.RetryCount+1,
-		"correlation_id", job.CorrelationID)
-	log.Info("job claimed", "lock_epoch", claimed.Lease.Epoch, "previous_lock_state", claimed.PreviousLockState)
+		"migration_id", job.MigrationID, "db_id", job.DBID, "action", job.ActionType, "mode", job.ExecutionMode,
+		"attempt", job.RetryCount+1, "correlation_id", job.CorrelationID)
+	log.InfoContext(ctx, "job.claimed", "status", "running", "lock_epoch", claimed.Lease.Epoch, "previous_lock_state", claimed.PreviousLockState)
 
 	work, err := w.st.LoadJobWork(ctx, job.ID)
 	if err != nil {
-		w.requeue(ctx, log, claimed.Lease, job.RetryCount, fmt.Errorf("load job: %w", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		w.requeue(ctx, log, claimed.Lease, job.RetryCount, job.ExecutionMode, job.ActionType, "", fmt.Errorf("load job: %w", err))
 		return
 	}
-	facts, err := w.st.LoadRevalidationFacts(ctx, work)
-	if err != nil {
-		w.requeue(ctx, log, claimed.Lease, job.RetryCount, fmt.Errorf("load revalidation state: %w", err))
-		return
-	}
-	if jerr := Revalidate(work, facts, claimed.PreviousLockState); jerr != nil {
-		w.failBeforeExecute(ctx, log, claimed.Lease, jerr)
-		return
+	ctx = telemetry.WithDatabase(ctx, job.DBID.String(), work.DB.Name)
+	span.SetAttributes(attribute.String("db_name", work.DB.Name))
+	if w.metrics != nil && !job.QueuedAt.IsZero() {
+		wait := claimedAt.Sub(job.QueuedAt)
+		if wait < 0 {
+			wait = 0
+		}
+		w.metrics.ObserveQueueWait(job.ExecutionMode, work.DB.Name, wait)
 	}
 
-	r, jerr, err := w.prepare(ctx, log, work, claimed.Lease)
+	facts, err := w.st.LoadRevalidationFacts(ctx, work)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		w.requeue(ctx, log, claimed.Lease, job.RetryCount, job.ExecutionMode, job.ActionType, work.DB.Name, fmt.Errorf("load revalidation state: %w", err))
+		return
+	}
+	_, revalSpan := telemetry.StartSpan(ctx, "worker.revalidate_migration",
+		attribute.String("migration_id", job.MigrationID.String()),
+		attribute.String("action", job.ActionType),
+		attribute.String("db_name", work.DB.Name),
+	)
+	if jerr := Revalidate(work, facts, claimed.PreviousLockState); jerr != nil {
+		revalSpan.RecordError(jerr)
+		revalSpan.SetStatus(codes.Error, jerr.Error())
+		revalSpan.End()
+		span.RecordError(jerr)
+		span.SetStatus(codes.Error, jerr.Error())
+		w.failBeforeExecute(ctx, log, claimed.Lease, work, jerr)
+		return
+	}
+	revalSpan.End()
+
+	lockCtx, lockSpan := telemetry.StartSpan(ctx, "worker.acquire_db_lock",
+		attribute.String("db_id", job.DBID.String()),
+		attribute.String("db_name", work.DB.Name),
+	)
+	lockStart := time.Now()
+	r, jerr, err := w.prepare(lockCtx, log, work, claimed.Lease)
+	if w.metrics != nil {
+		w.metrics.ObserveLockWait(work.DB.Name, time.Since(lockStart))
+	}
 	if jerr != nil {
-		w.failBeforeExecute(ctx, log, claimed.Lease, jerr)
+		lockSpan.RecordError(jerr)
+		lockSpan.SetStatus(codes.Error, jerr.Error())
+		lockSpan.End()
+		span.RecordError(jerr)
+		span.SetStatus(codes.Error, jerr.Error())
+		w.failBeforeExecute(ctx, log, claimed.Lease, work, jerr)
 		return
 	}
 	if err != nil {
-		w.requeue(ctx, log, claimed.Lease, job.RetryCount, err)
+		lockSpan.RecordError(err)
+		lockSpan.SetStatus(codes.Error, err.Error())
+		lockSpan.End()
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		w.requeue(ctx, log, claimed.Lease, job.RetryCount, job.ExecutionMode, job.ActionType, work.DB.Name, err)
 		return
 	}
+	lockSpan.End()
+	r.ctx = ctx
+	r.startedAt = time.Now()
 	defer r.close()
 
 	if err := w.st.StartExecution(ctx, claimed.Lease, work.Migration.ID, true); err != nil {
-		log.Error("start execution", "error", err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		log.ErrorContext(ctx, "execution.start_failed", "status", "error", "error", err)
 		return
 	}
-	log.Info("execution started")
+	log.InfoContext(ctx, "execution.started", "status", "running")
 	r.execute()
 }
 
@@ -239,24 +316,33 @@ func (w *Worker) prepare(ctx context.Context, log *slog.Logger, work store.JobWo
 	return r, nil, nil
 }
 
-func (w *Worker) failBeforeExecute(ctx context.Context, log *slog.Logger, lease store.Lease, jerr *JobError) {
-	log.Warn("job failed before execution", "code", jerr.Code, "error", jerr.Message)
+func (w *Worker) failBeforeExecute(ctx context.Context, log *slog.Logger, lease store.Lease, work store.JobWork, jerr *JobError) {
+	log.WarnContext(ctx, "job.failed_before_execute", "status", "failed", "code", jerr.Code, "error", jerr.Message)
+	if w.metrics != nil {
+		w.metrics.JobCompleted(domain.JobFailed, work.Job.ExecutionMode, work.Job.ActionType, work.DB.Name, 0)
+	}
 	if err := w.st.FailBeforeExecute(ctx, lease, jerr.Error()); err != nil {
-		log.Error("record failure", "error", err)
+		log.ErrorContext(ctx, "job.record_failure_failed", "status", "error", "error", err)
 	}
 }
 
-func (w *Worker) requeue(ctx context.Context, log *slog.Logger, lease store.Lease, retryCount int, cause error) {
+func (w *Worker) requeue(ctx context.Context, log *slog.Logger, lease store.Lease, retryCount int, mode, action, dbName string, cause error) {
 	backoff := store.RetryBackoff(retryCount)
 	failed, err := w.st.RequeueJob(ctx, lease, backoff, cause.Error())
 	switch {
 	case errors.Is(err, store.ErrLeaseLost):
-		log.Warn("lease lost before requeue", "cause", cause)
+		log.WarnContext(ctx, "job.lease_lost_before_requeue", "status", "warn", "cause", cause)
 	case err != nil:
-		log.Error("requeue job", "error", err, "cause", cause)
+		log.ErrorContext(ctx, "job.requeue_failed", "status", "error", "error", err, "cause", cause)
 	case failed:
-		log.Warn("job failed after exhausting retries", "error", cause)
+		if w.metrics != nil {
+			w.metrics.JobCompleted(domain.JobFailed, mode, action, dbName, 0)
+		}
+		log.WarnContext(ctx, "job.failed_retries_exhausted", "status", "failed", "error", cause)
 	default:
-		log.Warn("job requeued", "error", cause, "backoff", backoff)
+		if w.metrics != nil {
+			w.metrics.JobRetried(mode, dbName)
+		}
+		log.WarnContext(ctx, "job.requeued", "status", "queued", "error", cause, "backoff_ms", backoff.Milliseconds())
 	}
 }

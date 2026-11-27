@@ -16,6 +16,7 @@ import (
 	"leafygo/internal/auth"
 	"leafygo/internal/domain"
 	"leafygo/internal/store"
+	"leafygo/internal/telemetry"
 )
 
 const (
@@ -59,23 +60,29 @@ type apiErrorDetail struct {
 }
 
 func correlationIDFromRequest(r *http.Request) string {
+	if cid := telemetry.CorrelationFrom(r.Context()); cid != "" {
+		return cid
+	}
 	if cid := strings.TrimSpace(r.Header.Get("X-Correlation-ID")); cid != "" {
 		return cid
 	}
 	if reqID := middleware.GetReqID(r.Context()); reqID != "" {
 		return "req-" + reqID
 	}
-	return "req-" + uuid.NewString()
+	return telemetry.NewCorrelationID()
 }
 
 func traceIDFromRequest(r *http.Request) string {
+	if tid := telemetry.TraceIDFromContext(r.Context()); tid != "" {
+		return tid
+	}
 	if tp := strings.TrimSpace(r.Header.Get("traceparent")); tp != "" {
 		parts := strings.Split(tp, "-")
 		if len(parts) >= 2 && len(parts[1]) == 32 {
 			return parts[1]
 		}
 	}
-	return strings.ReplaceAll(uuid.NewString(), "-", "")
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -145,7 +152,12 @@ func (s *Server) apiAuthenticate(next http.Handler) http.Handler {
 		if err == nil {
 			user.LeaderOfGroups = leaderGroups
 		}
-		ctx := context.WithValue(r.Context(), sessionKey, &sess)
+		actor := "user:" + user.Username
+		ctx := telemetry.WithActor(r.Context(), actor)
+		if info := requestInfoFrom(ctx); info != nil {
+			info.Actor = actor
+		}
+		ctx = context.WithValue(ctx, sessionKey, &sess)
 		ctx = context.WithValue(ctx, userKey, &user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -227,6 +239,11 @@ func (s *Server) apiRequireDBAction(action access.Action) func(http.Handler) htt
 			}
 			ctx := context.WithValue(r.Context(), dbKey, &conn)
 			ctx = context.WithValue(ctx, levelKey, level)
+			ctx = telemetry.WithDatabase(ctx, id.String(), conn.Name)
+			if info := requestInfoFrom(ctx); info != nil {
+				info.DBID = id.String()
+				info.DBName = conn.Name
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

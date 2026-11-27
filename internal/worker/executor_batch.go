@@ -5,9 +5,13 @@ import (
 	"errors"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"leafygo/internal/domain"
 	"leafygo/internal/store"
 	"leafygo/internal/target"
+	"leafygo/internal/telemetry"
 )
 
 // Applies sql_up batch by batch from the last checkpoint of the root execution. Every batch commits
@@ -75,16 +79,44 @@ func (r *run) executeForwardBatches() {
 			break
 		}
 		batchNo++
-		rows, err := target.RunForwardBatch(ctx, r.conn, r.work.Migration.SQLUp, target.BatchRun{
+		batchCtx, batchSpan := telemetry.StartSpan(ctx, "worker.execute_batch",
+			attribute.Int("batch_no", batchNo),
+			attribute.Int64("cursor_from", from),
+			attribute.Int64("cursor_to", to),
+			attribute.Int64("batch_size", r.batch.BatchSize),
+			attribute.String("action", job.ActionType),
+			attribute.String("db_name", r.work.DB.Name),
+		)
+		boundSQL, boundArgs := target.BindCursorRange(r.work.Migration.SQLUp, from, to)
+		meta := r.sqlMeta(boundSQL, boundArgs, batchNo, &from, &to)
+		telemetry.LogSQLStartWith(r.log, batchCtx, meta)
+		batchStart := time.Now()
+		rows, err := target.RunForwardBatch(batchCtx, r.conn, r.work.Migration.SQLUp, target.BatchRun{
 			RootID: job.RootExecutionID, ExecutionID: job.ExecutionID, BatchNo: batchNo,
 			From: from, To: to, Epoch: r.lease.Epoch, Timeout: r.w.cfg.ExecTimeout,
 		})
+		batchDur := time.Since(batchStart)
+		telemetry.LogSQLResultWith(r.log, batchCtx, meta, rows, batchDur, err)
 		if err != nil {
-			r.log.Warn("batch rollback", "batch_no", batchNo, "cursor_from", from, "cursor_to", to, "error", err)
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, err.Error())
+			if !isUncertain(err) {
+				telemetry.LogSQLTxEndWith(r.log, batchCtx, meta, "rollback", batchDur, err)
+			}
+			if r.w.metrics != nil {
+				r.w.metrics.BatchProcessed("failed", r.work.DB.Name, 1)
+			}
+			batchSpan.End()
 			r.stopForward(hb, err, p.JobBatches)
 			return
 		}
-		r.log.Info("batch commit", "batch_no", batchNo, "cursor_from", from, "cursor_to", to, "rows", rows)
+		telemetry.LogSQLTxEndWith(r.log, batchCtx, meta, "commit", batchDur, nil)
+		batchSpan.SetAttributes(attribute.Int64("rows_affected", rows))
+		batchSpan.End()
+		if r.w.metrics != nil {
+			r.w.metrics.BatchProcessed("success", r.work.DB.Name, 1)
+			r.w.metrics.RowsProcessed(job.ActionType, r.work.DB.Name, rows)
+		}
 
 		lastCursor = to
 		p.JobBatches++
@@ -151,16 +183,44 @@ func (r *run) executeReverseBatches() {
 		if cp == nil {
 			break
 		}
-		rows, err := target.RunReverseBatch(ctx, r.conn, r.work.Migration.SQLDown, target.BatchRun{
+		batchCtx, batchSpan := telemetry.StartSpan(ctx, "worker.execute_batch",
+			attribute.Int("batch_no", cp.BatchNo),
+			attribute.Int64("cursor_from", cp.CursorFrom),
+			attribute.Int64("cursor_to", cp.CursorTo),
+			attribute.Int64("batch_size", r.batch.BatchSize),
+			attribute.String("action", job.ActionType),
+			attribute.String("db_name", r.work.DB.Name),
+		)
+		boundSQL, boundArgs := target.BindCursorRange(r.work.Migration.SQLDown, cp.CursorFrom, cp.CursorTo)
+		meta := r.sqlMeta(boundSQL, boundArgs, cp.BatchNo, &cp.CursorFrom, &cp.CursorTo)
+		telemetry.LogSQLStartWith(r.log, batchCtx, meta)
+		batchStart := time.Now()
+		rows, err := target.RunReverseBatch(batchCtx, r.conn, r.work.Migration.SQLDown, target.BatchRun{
 			RootID: job.RootExecutionID, ExecutionID: job.ExecutionID, BatchNo: cp.BatchNo,
 			From: cp.CursorFrom, To: cp.CursorTo, Epoch: r.lease.Epoch, Timeout: r.w.cfg.ExecTimeout,
 		})
+		batchDur := time.Since(batchStart)
+		telemetry.LogSQLResultWith(r.log, batchCtx, meta, rows, batchDur, err)
 		if err != nil {
-			r.log.Warn("batch revert rollback", "batch_no", cp.BatchNo, "cursor_from", cp.CursorFrom, "cursor_to", cp.CursorTo, "error", err)
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, err.Error())
+			if !isUncertain(err) {
+				telemetry.LogSQLTxEndWith(r.log, batchCtx, meta, "rollback", batchDur, err)
+			}
+			if r.w.metrics != nil {
+				r.w.metrics.BatchProcessed("failed", r.work.DB.Name, 1)
+			}
+			batchSpan.End()
 			r.stopReverse(hb, err, anyReverted)
 			return
 		}
-		r.log.Info("batch revert commit", "batch_no", cp.BatchNo, "cursor_from", cp.CursorFrom, "cursor_to", cp.CursorTo, "rows", rows)
+		telemetry.LogSQLTxEndWith(r.log, batchCtx, meta, "commit", batchDur, nil)
+		batchSpan.SetAttributes(attribute.Int64("rows_affected", rows))
+		batchSpan.End()
+		if r.w.metrics != nil {
+			r.w.metrics.BatchProcessed("success", r.work.DB.Name, 1)
+			r.w.metrics.RowsProcessed(job.ActionType, r.work.DB.Name, rows)
+		}
 
 		anyReverted = true
 		p.JobBatches--
